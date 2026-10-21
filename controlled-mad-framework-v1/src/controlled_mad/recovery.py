@@ -19,7 +19,7 @@ def verify_run(store):
         if key!=canonical_hash(p) or p['task_id'] not in tasks: raise IntegrityError('解析身份或任务引用不符')
         raw=store.read_blob('raw',p['attempt_id'],'.bin')
         if p['raw_hash']!=canonical_hash(raw.hex()): raise IntegrityError('解析未指向原始响应')
-        if p['valid'] and tasks[p['task_id']]['stage'] in ('S0','T1','T2','T3','generate') and p['value']['label'] not in tasks[p['task_id']]['context']['labels']:
+        if p['valid'] and tasks[p['task_id']]['stage'] in ('S0','T1','T2','T3','T4','T5','generate') and p['value']['label'] not in tasks[p['task_id']]['context']['labels']:
             raise IntegrityError('解析中的投票标签越界')
     for tid,pid in store.selection().items():
         if pid not in parses or parses[pid]['task_id']!=tid: raise IntegrityError('选定解析引用不一致')

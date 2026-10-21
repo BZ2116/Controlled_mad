@@ -35,7 +35,7 @@ class Planner:
         tid=canonical_hash(payload)
         task=Task(tid,stage,profile_id,tuple(messages),tuple(dependencies),ctx,canonical_hash(messages))
         self.put('tasks',tid,plain(task)); self.tasks[tid]=task
-        if stage in ('T1','T2','T3'):
+        if stage in ('T1','T2','T3','T4','T5'):
             self.put('deliveries',tid,{'task_id':tid,'prompt_hash':task.prompt_hash,**{k:ctx[k] for k in ('agent','round','protocol','branch','variant','delivered','blocked','history_seen')}})
         return task
     def prompt(self,name,payload):
@@ -61,7 +61,9 @@ class Planner:
         for agent in AGENTS:
             old=previous['histories'][agent]; history=HistoryState(tuple(old['messages']),tuple(old['seen']))
             delivery=route(history,round_no,protocol,agent,rule,peers)
-            histories[agent]=extend_history(history,delivery,'Reconsider now. Return JSON with label and comment using only the allowed labels.')
+            instruction=('This is round '+str(round_no)+' of 5. Your answer is provisional until round 5. Reconsider now. Return JSON with label and comment using only the allowed labels.'
+                         if self.config.get('experiment')=='rq2_five_round' else 'Reconsider now. Return JSON with label and comment using only the allowed labels.')
+            histories[agent]=extend_history(history,delivery,instruction)
             ctx={**base,'agent':agent,'round':round_no,'protocol':protocol,'branch':rule['id'] if rule else 'natural',
                 'parent_snapshot':previous['snapshot_id'],'delivered':[m.message_id for m in delivery.delivered],'blocked':list(delivery.blocked),'history_seen':list(histories[agent].seen)}
             tasks.append(self.make(f'T{round_no}',base['model_id'],histories[agent].messages,tuple(r['task_id'] for r in previous['replies']),ctx))
@@ -81,11 +83,21 @@ class Planner:
                 {'role':'assistant','content':json.dumps({'label':own.label,'comment':own.comment},ensure_ascii=False)})
             history=HistoryState(messages,(own.message_id,))
             delivery=route(history,1,'shared',agent,None,tuple(sorted(initial,key=lambda m:self.config['message_order'].index(m.sender))))
-            histories[agent]=extend_history(history,delivery,'Read the initial peer comments and give your revised label and comment.')
+            instruction=('This is round 1 of 5. Read the initial peer comments and give your provisional revised label and comment.'
+                         if self.config.get('experiment')=='rq2_five_round' else 'Read the initial peer comments and give your revised label and comment.')
+            histories[agent]=extend_history(history,delivery,instruction)
             ctx={**base,'agent':agent,'round':1,'protocol':'shared','branch':'natural','delivered':[m.message_id for m in delivery.delivered],'blocked':[],
                 'history_seen':list(histories[agent].seen)}
             tasks.append(self.make('T1',base['model_id'],histories[agent].messages,tuple(v.task_id for v in s0.votes),ctx))
         first=self.snapshot({**base,'protocol':'shared','branch':'natural'},1,tasks,histories,s0.s0_hash)
+        if self.config.get('experiment')=='rq2_five_round':
+            result={'M':{'1':first}}
+            previous=first
+            for round_no in range(2,6):
+                previous=self.round(base,round_no,'M',previous)
+                result['M'][str(round_no)]=previous
+            self.series.append({'context':base,'states':result})
+            return result
         result={'I':{'1':first},'M':{'1':first},'interventions':{}}
         for protocol in ('I','M'):
             second=self.round(base,2,protocol,first)

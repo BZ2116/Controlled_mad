@@ -2,7 +2,7 @@
   "schema_version": 1,
   "dataset": {
     "adapter": "averitec",
-    "source": "/absolute/path/to/AVeriTeC/data/dev.json"
+    "source": "../datasets/averitec/dev.json"
   },
   "profiles": {
     "judge": {

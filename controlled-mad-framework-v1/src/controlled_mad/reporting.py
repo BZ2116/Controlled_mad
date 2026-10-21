@@ -17,9 +17,12 @@ def export_analysis(bundle,store):
                     writer.writerow({k:json.dumps(v,ensure_ascii=False) if isinstance(v,(dict,list)) else v for k,v in row.items()})
                 store.write_blob('exports',name,out.getvalue().encode('utf-8'),'.csv')
     den=bundle['denominators']
-    text='# 受控 MAD 运行报告\n\n本报告为描述性结果，不包含显著性检验。模拟后端输出只能用于工程验收。\n\n'
+    rq2=bundle.get('experiment')=='rq2_five_round'
+    text=('# RQ2 五轮补充实验报告\n\n' if rq2 else '# 受控 MAD 运行报告\n\n')
+    text+='本报告为描述性结果；模拟后端输出只能用于工程验收。\n\n'
     text+='```json\n'+json.dumps(den,ensure_ascii=False,indent=2)+'\n```\n\n'
-    text+='完整逐标签效应、干预、O/O 诊断、材料资格及执行记录见 exports 目录。\n'
+    text+=('五轮 M-R − M-O 配对轨迹、题目聚合、逐题 bootstrap 区间、材料资格及执行记录见 exports 目录。T5 才是终局。\n'
+           if rq2 else '完整逐标签效应、干预、O/O 诊断、材料资格及执行记录见 exports 目录。\n')
     store.write_blob('reports',f'report-{aid[:16]}',text.encode('utf-8'),'.md')
     store.put('reports',f'analysis-{aid[:16]}',bundle)
     return {'analysis_id':aid,'report':str(store.path/'reports'/f'report-{aid[:16]}.md'),'exports':paths}

@@ -3,7 +3,12 @@ from collections import Counter
 
 STAGES=('S0','generate','annotate','audit','T1','T2','T3')
 
+def stages_for(config):
+    return STAGES+('T4','T5') if config.get('experiment')=='rq2_five_round' else STAGES
+
 def arm_counts(config):
+    if config.get('experiment')=='rq2_five_round':
+        return Counter({f'T{round_no}':3 for round_no in range(1,6)})
     counts=Counter(T1=3,T2=6,T3=6)
     for rule in config['interventions']:
         if rule['delivery_round']==2: counts['T2']+=3
@@ -13,6 +18,7 @@ def arm_counts(config):
 def progress_snapshot(store,graph,states):
     """等待项包含尚未生成或被无效上游阻断的槽位，不伪装成已取消。"""
     config=store.config
+    stages_order=stages_for(config)
     groups=len(store.get('inputs','items')['items'])*len(config['debate_models'])
     rhetoric=sum(op in ('ethos','logos','pathos') for op in config['operations'])
     reorder=len(config['operations'])-rhetoric
@@ -25,9 +31,9 @@ def progress_snapshot(store,graph,states):
     if oo['enabled']:
         for stage,count in (('T1',3),('T2',6),('T3',6)):
             per[stage]+=count*2*oo['repeats']
-    planned=Counter({stage:per[stage]*groups for stage in STAGES})
-    stage_states={stage:Counter() for stage in STAGES}
-    group_states={group:{stage:Counter() for stage in STAGES} for group in
+    planned=Counter({stage:per[stage]*groups for stage in stages_order})
+    stage_states={stage:Counter() for stage in stages_order}
+    group_states={group:{stage:Counter() for stage in stages_order} for group in
                   {(row['dataset_id'],row['item_id'],model) for row in store.get('inputs','items')['items'] for model in config['debate_models']}}
     material_tasks=Counter()
     key=lambda ctx:(ctx['dataset_id'],ctx['item_id'],ctx['model_id'])
@@ -56,7 +62,7 @@ def progress_snapshot(store,graph,states):
     cancelled=Counter()
     for row in cancelled_by_group.values(): cancelled.update(row)
     stages={}
-    for stage in STAGES:
+    for stage in stages_order:
         counts=stage_states[stage]
         waiting=planned[stage]-sum(counts.values())-cancelled[stage]
         if waiting<0: raise ValueError('进度槽位统计超出冻结计划')
@@ -71,7 +77,7 @@ def progress_snapshot(store,graph,states):
     for group in cancelled_by_group:
         dataset_id,item_id,_model=group
         target=item_rows.setdefault((dataset_id,item_id),Counter())
-        for stage in STAGES:
+        for stage in stages_order:
             target['planned']+=per[stage]
             target['cancelled']+=cancelled_by_group[group][stage]
             for state in ('succeeded','ready','invalid','transport_unknown'):

@@ -11,9 +11,9 @@ def read_records(source):
     path=Path(source)
     raw=path.read_bytes()
     try:
-        decoded=json.loads(raw.decode('utf-8'))
+        decoded=json.loads(raw.decode('utf-8-sig'))
     except json.JSONDecodeError:
-        decoded=[json.loads(line) for line in raw.decode('utf-8').splitlines() if line.strip()]
+        decoded=[json.loads(line) for line in raw.decode('utf-8-sig').splitlines() if line.strip()]
     if isinstance(decoded,dict):
         if isinstance(decoded.get('data'),list): decoded=decoded['data']
         elif isinstance(decoded.get('records'),list): decoded=decoded['records']

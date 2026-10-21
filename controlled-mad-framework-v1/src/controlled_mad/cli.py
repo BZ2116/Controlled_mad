@@ -3,13 +3,15 @@ from pathlib import Path
 from . import api
 from .budget import BudgetError
 from .store import IntegrityError
-from .identity import canonical_bytes
+from .identity import canonical_bytes, canonical_hash
+from .config import load_config
 
 class ProgressReporter:
     """在 stderr 单行刷新固定计划的累计进度，stdout 保留 JSON。"""
     def __init__(self):
         self.tty=sys.stderr.isatty()
         self.active=False
+        self.previous_width=0
 
     def display(self,line):
         if self.tty:
@@ -19,7 +21,8 @@ class ProgressReporter:
                 char_width=0 if unicodedata.combining(char) else 2 if unicodedata.east_asian_width(char) in ('F','W') else 1
                 if width+char_width>limit: break
                 visible.append(char); width+=char_width
-            sys.stderr.write('\r\033[2K'+''.join(visible))
+            sys.stderr.write('\r'+''.join(visible)+' '*max(0,self.previous_width-width))
+            self.previous_width=width
             self.active=True
         else:
             sys.stderr.write(line+'\n')
@@ -94,12 +97,15 @@ def parser():
         q.add_argument('--config',required=True)
         if name=='init':
             q.add_argument('--run-id',required=True); q.add_argument('--runs-root')
+    q=sub.add_parser('rq2',help='五轮补充实验：首次冻结，之后按同一配置自动续跑')
+    q.add_argument('--config',required=True); q.add_argument('--run-id',required=True); q.add_argument('--runs-root')
+    q.add_argument('--allow-network',action='store_true'); q.add_argument('--max-calls',type=int); q.add_argument('--backend',choices=('mock','native'))
     for name in ('advance','export-tasks','import-responses','run','status','resume','reparse','retry','fork-revision','analyze','trace','verify'):
         q=sub.add_parser(name)
         q.add_argument('--run-id',required=True); q.add_argument('--runs-root')
         if name in ('run','resume'):
             q.add_argument('--allow-network',action='store_true'); q.add_argument('--max-calls',type=int); q.add_argument('--backend',choices=('mock','native'))
-        if name=='export-tasks': q.add_argument('--stage',choices=('S0','generate','annotate','audit','T1','T2','T3'))
+        if name=='export-tasks': q.add_argument('--stage',choices=('S0','generate','annotate','audit','T1','T2','T3','T4','T5'))
         if name=='import-responses': q.add_argument('--source',required=True)
         if name in ('reparse','retry','fork-revision'): q.add_argument('--task-id',required=True)
         if name=='reparse': q.add_argument('--parser-version',required=True,choices=('vote-v1','vote-v2'))
@@ -115,6 +121,22 @@ def dispatch(a):
     if a.command=='init':
         store=api.create_run(a.config,a.run_id,a.runs_root)
         return {'run_id':store.path.name,'path':str(store.path),'status':api.status(store)}
+    if a.command=='rq2':
+        if a.max_calls is not None and a.max_calls<0: raise ValueError('--max-calls 不得为负')
+        config=load_config(a.config)
+        if config.get('experiment')!='rq2_five_round': raise ValueError('rq2 命令只能运行五轮补充实验配置')
+        root=Path(a.runs_root) if a.runs_root else Path.cwd()/'runs'
+        run_path=root/a.run_id
+        if run_path.exists():
+            store=api.open_run(a.run_id,a.runs_root)
+            if store.config.get('experiment')!='rq2_five_round' or canonical_hash(store.config)!=canonical_hash(config):
+                raise ValueError('现有运行的实验模式或冻结配置与本次输入不同')
+        else: store=api.create_run(a.config,a.run_id,a.runs_root)
+        reporter=ProgressReporter()
+        try:
+            execution=api.execute_ready(store,a.allow_network,a.max_calls,'mock' if a.backend=='mock' else None,progress=reporter,auto_retry_unknown=True)
+        finally: reporter.close()
+        return {'execution':execution,'status':api.status(store)}
     store=api.open_run(a.run_id,a.runs_root)
     if a.command=='status': return api.status(store)
     if a.command=='verify': return api.verify_run(store)
@@ -136,7 +158,7 @@ def dispatch(a):
     if a.command=='analyze': return api.analyze_and_export(store)
     if a.command=='trace': return {'path':api.export_trace(store,a.item_id)}
     if a.command=='import-responses':
-        rows=[json.loads(line) for line in Path(a.source).read_text().splitlines() if line.strip()]
+        rows=[json.loads(line) for line in Path(a.source).read_text(encoding='utf-8-sig').splitlines() if line.strip()]
         # 先检查整批格式，避免坏行使已导入部分难以追踪；逐条提交仍独占持久化。
         if any(set(row)!={'task_id','attempt_id','text'} or not all(isinstance(v,str) for v in row.values()) for row in rows):
             raise ValueError('每行必须恰有字符串 task_id、attempt_id 和 text')
@@ -144,11 +166,15 @@ def dispatch(a):
     raise ValueError('未知命令')
 
 def main(argv=None):
+    for stream in (sys.stdout,sys.stderr):
+        if hasattr(stream,'reconfigure'):
+            try: stream.reconfigure(encoding='utf-8',errors='replace')
+            except (ValueError,OSError): pass
     args=parser().parse_args(argv)
     try:
         result=dispatch(args)
         print(json.dumps(result,ensure_ascii=False,indent=2))
-        if args.command in ('run','resume'):
+        if args.command in ('run','resume','rq2'):
             if result['execution']['stop'] in ('transport_unknown','backend_error') or result['status']['invalid'] or result['status']['transport_unknown']: return 3
         return 0
     except BudgetError as e:

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "experiment": "rq2_five_round",
+  "dataset": {"adapter": "jsonl", "source": "../examples/toy_dataset.jsonl"},
+  "subset": {"size": 2, "seed": 42},
+  "profiles": {"mock": {"provider": "mock", "model": "mock-v1", "max_tokens": 2048}},
+  "debate_models": ["mock"],
+  "material_model": "mock",
+  "material_audit": false,
+  "s0_batch": "s0-rq2-001",
+  "selection_seed": 42,
+  "repeats": 1,
+  "history_policy": "full",
+  "message_order": ["agent_1", "agent_2", "agent_3"],
+  "operations": ["ethos", "logos", "pathos"],
+  "interventions": [],
+  "diagnostics": {"oo": {"enabled": false, "repeats": 1}},
+  "max_generation_attempts": 1,
+  "max_attempts": 3,
+  "budget": {
+    "max_calls": 500,
+    "max_tokens": 10000000,
+    "stage_calls": {"S0": 50, "generate": 50, "annotate": 0, "audit": 0,
+      "T1": 100, "T2": 100, "T3": 100, "T4": 100, "T5": 100}
+  },
+  "network_enabled": false,
+  "mock_scenario": "../examples/mock_scenario.json"
+}

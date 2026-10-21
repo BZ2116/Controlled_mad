@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "adapter": "averitec",
+    "source": "../datasets/averitec/dev.json"
+  },
+  "profiles": {
+    "minimax_m3": {
+      "provider": "anthropic",
+      "model": "MiniMax-M3",
+      "expected_model": "MiniMax-M3",
+      "base_url": "https://api.minimaxi.com/anthropic/v1",
+      "credential_env": "MINIMAX_API_KEY",
+      "temperature": 0.0,
+      "max_tokens": 1024,
+      "max_tokens_field": "max_tokens",
+      "seed": 42,
+      "supports_seed": true,
+      "context_limit": 128000,
+      "timeout": 180
+    }
+  },
+  "debate_models": [
+    "minimax_m3"
+  ],
+  "material_model": "minimax_m3",
+  "audit_model": "minimax_m3",
+  "s0_batch": "s0-001",
+  "selection_seed": 42,
+  "repeats": 1,
+  "history_policy": "full",
+  "message_order": [
+    "agent_1",
+    "agent_2",
+    "agent_3"
+  ],
+  "operations": [
+    "ethos",
+    "logos",
+    "pathos"
+  ],
+  "interventions": [],
+  "diagnostics": {
+    "oo": {
+      "enabled": false,
+      "repeats": 1
+    }
+  },
+  "max_generation_attempts": 1,
+  "max_attempts": 3,
+  "budget": {
+    "max_calls": 40000,
+    "max_tokens": 100000000,
+    "stage_calls": {
+      "S0": 2000,
+      "generate": 2000,
+      "annotate": 1,
+      "audit": 2000,
+      "T1": 6500,
+      "T2": 12500,
+      "T3": 12500
+    }
+  },
+  "network_enabled": true,
+  "mock_scenario": null
+}

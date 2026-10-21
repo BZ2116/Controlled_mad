@@ -69,5 +69,6 @@ class Progress(unittest.TestCase):
             reporter({'event':'batch','overall':p,'completed':0})
             reporter.close()
         text=output.getvalue()
-        self.assertEqual(text.count('\r\033[2K'),2)
+        self.assertEqual(text.count('\r'),2)
+        self.assertNotIn('\033',text)
         self.assertEqual(text.count('\n'),1)

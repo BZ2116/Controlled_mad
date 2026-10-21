@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "adapter": "averitec",
+    "source": "../datasets/averitec/dev.json"
+  },
+  "profiles": {
+    "minimax_m31_flash": {
+      "provider": "openai",
+      "model": "MiniMax-M3.1-Flash",
+      "expected_model": "MiniMax-M3.1-Flash",
+      "base_url": "https://api.minimax.cn/v1",
+      "credential_env": "MINIMAX_API_KEY",
+      "temperature": 0.0,
+      "max_tokens": 16384,
+      "max_tokens_field": "max_tokens",
+      "reasoning_effort": "max",
+      "seed": null,
+      "supports_seed": false,
+      "context_limit": 128000,
+      "timeout": 180
+    }
+  },
+  "debate_models": [
+    "minimax_m31_flash"
+  ],
+  "material_model": "minimax_m31_flash",
+  "s0_batch": "s0-rq2-001",
+  "selection_seed": 42,
+  "repeats": 1,
+  "history_policy": "full",
+  "message_order": [
+    "agent_1",
+    "agent_2",
+    "agent_3"
+  ],
+  "operations": [
+    "ethos",
+    "logos",
+    "pathos"
+  ],
+  "interventions": [],
+  "diagnostics": {
+    "oo": {
+      "enabled": false,
+      "repeats": 1
+    }
+  },
+  "max_generation_attempts": 1,
+  "max_attempts": 3,
+  "budget": {
+    "max_calls": 10000,
+    "max_tokens": 750000000,
+    "stage_calls": {
+      "S0": 1000,
+      "generate": 1000,
+      "annotate": 0,
+      "audit": 0,
+      "T1": 2000,
+      "T2": 2000,
+      "T3": 2000,
+      "T4": 2000,
+      "T5": 2000
+    }
+  },
+  "network_enabled": true,
+  "mock_scenario": null,
+  "experiment": "rq2_five_round",
+  "subset": {
+    "size": 100,
+    "seed": 42
+  },
+  "material_audit": false
+}

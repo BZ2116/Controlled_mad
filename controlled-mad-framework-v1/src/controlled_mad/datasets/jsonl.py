@@ -27,5 +27,5 @@ def from_rows(rows, source_hash=''):
 class JsonlAdapter:
     def load(self,source):
         data=Path(source).read_bytes()
-        rows=[json.loads(line) for line in data.decode('utf-8').splitlines() if line.strip()]
+        rows=[json.loads(line) for line in data.decode('utf-8-sig').splitlines() if line.strip()]
         return from_rows(rows,hashlib.sha256(data).hexdigest())

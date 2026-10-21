@@ -12,6 +12,7 @@ from .budget import Budget, BudgetError
 from .parsing import parse_vote, json_object, parse_audit
 from .material_checks import validate_blocks
 from .datasets.base import adapter_for
+from .subset import select_bundle
 from .backends.mock import MockBackend
 from .backends.openai_compatible import OpenAIBackend
 from .backends.anthropic_compatible import AnthropicBackend
@@ -24,12 +25,16 @@ def create_run(config_path,run_id,root=None):
     c=load_config(config_path)
     adapter=adapter_for(c['dataset']['adapter'])
     bundle=adapter.load(c['dataset']['source'])
+    subset_record=None
+    if c.get('experiment')=='rq2_five_round': bundle,subset_record=select_bundle(bundle,c['subset'])
     if not bundle.items: raise ValueError('数据集中没有可运行题目，请检查拒绝分母')
     names=('s0','debate','rhetoric','audit','annotate')
     overrides=c.get('prompts',{})
     if set(overrides)-set(names): raise ValueError('未知提示名称')
-    templates={name:(Path(config_path).resolve().parent/overrides[name]).read_text() if name in overrides else files('controlled_mad').joinpath('resources',f'{name}.v1.txt').read_text(encoding='utf-8') for name in names}
-    scenario=json.loads(Path(c['mock_scenario']).read_text()) if c.get('mock_scenario') else {'items':{}}
+    templates={name:(Path(config_path).resolve().parent/overrides[name]).read_text(encoding='utf-8-sig') if name in overrides else files('controlled_mad').joinpath('resources',f'{name}.v1.txt').read_text(encoding='utf-8') for name in names}
+    if c.get('experiment')=='rq2_five_round' and 'debate' not in overrides:
+        templates['debate']=files('controlled_mad').joinpath('resources','debate.rq2-five-round.txt').read_text(encoding='utf-8')
+    scenario=json.loads(Path(c['mock_scenario']).read_text(encoding='utf-8-sig')) if c.get('mock_scenario') else {'items':{}}
     used=set([*c['debate_models'],c['material_model']])
     if c.get('material_audit',True): used.add(c['audit_model'])
     for p in (c['profiles'][name] for name in used):
@@ -37,6 +42,7 @@ def create_run(config_path,run_id,root=None):
     store=RunStore.create(root or Path.cwd()/'runs',run_id,c,source_hash=bundle.source_hash)
     with store.lock():
         store.put('inputs','items',{'items':plain(bundle.items),'rejected':plain(bundle.rejected),'source_hash':bundle.source_hash})
+        if subset_record is not None: store.put('inputs','subset',subset_record)
         store.put('analysis_inputs','gold',{'gold':plain(bundle.gold)})
         store.put('inputs','prompts',templates)
         store.put('inputs','mock',scenario)
@@ -58,7 +64,7 @@ def load_task(store,task_id):
 def parse_result(task,result,version):
     if result.error: return {'valid':False,'value':None,'error':result.error}
     try:
-        if task.stage in ('S0','T1','T2','T3','generate'):
+        if task.stage in ('S0','T1','T2','T3','T4','T5','generate'):
             return parse_vote(result.text,tuple(task.context['labels']),version)
         if task.stage=='annotate':
             value=json_object(result.text)

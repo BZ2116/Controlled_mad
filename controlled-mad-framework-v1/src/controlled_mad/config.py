@@ -5,14 +5,24 @@ from pathlib import Path
 from .domain import AGENTS, OPERATIONS, ModelProfile, Intervention
 from .identity import canonical_hash, safe_id
 
-KEYS={'schema_version','dataset','profiles','debate_models','material_model','audit_model','material_audit','s0_batch','selection_seed','repeats','history_policy','message_order','operations','interventions','diagnostics','max_generation_attempts','max_attempts','budget','network_enabled','mock_scenario','prompts'}
+KEYS={'schema_version','dataset','profiles','debate_models','material_model','audit_model','material_audit','s0_batch','selection_seed','repeats','history_policy','message_order','operations','interventions','diagnostics','max_generation_attempts','max_attempts','budget','network_enabled','mock_scenario','prompts','experiment','subset'}
 
 def validate_config(c):
     if not isinstance(c,dict): raise ValueError('配置必须是 JSON 对象')
-    required=KEYS-{'mock_scenario','prompts','material_audit','audit_model'}
+    required=KEYS-{'mock_scenario','prompts','material_audit','audit_model','experiment','subset'}
     if set(c)-KEYS or required-set(c): raise ValueError(f'配置字段不符，缺少 {sorted(required-set(c))}，未知 {sorted(set(c)-KEYS)}')
     if 'material_audit' in c and type(c['material_audit']) is not bool: raise ValueError('material_audit 必须为布尔值')
     if c['schema_version']!=1 or c['history_policy']!='full': raise ValueError('只支持 schema 1 和 full 累计历史')
+    mode=c.get('experiment','rq1_three_round')
+    if mode not in ('rq1_three_round','rq2_five_round'): raise ValueError('未知实验模式')
+    if mode=='rq2_five_round':
+        subset=c.get('subset')
+        if not isinstance(subset,dict) or set(subset) not in ({'size','seed'},{'item_ids'}): raise ValueError('五轮实验须配置 size/seed 或 item_ids 子集')
+        if 'size' in subset and (type(subset['size']) is not int or subset['size']<1 or type(subset['seed']) is not int): raise ValueError('子集大小和种子无效')
+        if 'item_ids' in subset and (not isinstance(subset['item_ids'],list) or not subset['item_ids'] or any(not isinstance(x,str) for x in subset['item_ids']) or len(set(subset['item_ids']))!=len(subset['item_ids'])): raise ValueError('题号清单无效')
+        if c['interventions'] or c['diagnostics']['oo']['enabled']: raise ValueError('五轮补充实验只支持自然 MAD O/R')
+        if c.get('material_audit',True): raise ValueError('五轮补充实验必须关闭修辞语义审核')
+    elif 'subset' in c: raise ValueError('三轮配置不支持 subset')
     if sorted(c['message_order'])!=list(AGENTS): raise ValueError('消息顺序必须恰含三个 agent')
     for k in ('repeats','max_generation_attempts','max_attempts'):
         if type(c[k]) is not int or c[k]<1: raise ValueError(f'{k} 必须为正整数')
@@ -53,12 +63,13 @@ def validate_config(c):
     if type(oo['enabled']) is not bool or type(oo['repeats']) is not int or oo['repeats']<1: raise ValueError('诊断重复数无效')
     b=c['budget']
     if set(b)!={'max_calls','max_tokens','stage_calls'} or any(type(b[k]) is not int or b[k]<1 for k in ('max_calls','max_tokens')): raise ValueError('预算必须有正整数调用和 token 上限')
-    if set(b['stage_calls'])!={'S0','generate','annotate','audit','T1','T2','T3'} or any(type(v) is not int or v<0 for v in b['stage_calls'].values()): raise ValueError('阶段预算必须为非负整数')
+    expected={'S0','generate','annotate','audit','T1','T2','T3'} | ({'T4','T5'} if mode=='rq2_five_round' else set())
+    if set(b['stage_calls'])!=expected or any(type(v) is not int or v<0 for v in b['stage_calls'].values()): raise ValueError('阶段预算必须为非负整数且匹配实验轮次')
     return c
 
 def load_config(path):
     path=Path(path).resolve()
-    c=validate_config(json.loads(path.read_text()))
+    c=validate_config(json.loads(path.read_text(encoding='utf-8-sig')))
     for entry,key in ((c['dataset'],'source'),(c,'mock_scenario')):
         if entry.get(key): entry[key]=str((path.parent/entry[key]).resolve())
     return c

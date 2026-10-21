@@ -22,4 +22,7 @@ def select_sender(dataset_id, item_id, seed):
 def safe_id(value):
     if not isinstance(value,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',value):
         raise ValueError('ID 只允许字母、数字、点、横线和下划线，且不能是路径')
+    stem=value.split('.')[0].upper()
+    if value.endswith('.') or stem in {'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),*(f'LPT{i}' for i in range(1,10))}:
+        raise ValueError('ID 不能使用 Windows 保留文件名或以点结尾')
     return value

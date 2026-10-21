@@ -1,6 +1,6 @@
 # 受控 MAD 完整实验框架
 
-Python 3.11+，适用于 macOS/Linux，运行时仅用标准库。从数据导入、独立 S0 和修辞材料生成到三轮四格、消息干预与分析使用同一任务状态机。
+Python 3.11+，适用于 macOS/Linux/Windows，运行时仅用标准库。从数据导入、独立 S0 和修辞材料生成到三轮四格、消息干预与分析使用同一任务状态机；另有独立的 RQ2 五轮 MAD 补充实验。
 
 ## 直接运行
 
@@ -18,6 +18,39 @@ python3 -m controlled_mad trace --run-id my-demo --item-id toy-001
 ```
 
 my-demo 必须是未使用过的 run_id。演示含 6 道合成题、四标签和二标签空间、三种初态及材料不适用情况。模拟结果仅验证工程流程，不能当作研究结论。
+
+## 随仓库提供的数据和配置
+
+- [datasets/README.md](datasets/README.md) 列出 AVeriTeC dev、WiCE 文件、来源、许可及 SHA-256。AVeriTeC dev 可直接供本框架使用；WiCE 是研究候选，当前尚无本框架适配器。
+- `configs/averitec-rq1-*.json` 保留已有 MiniMax 配置参数，数据路径改为仓库内的 `../datasets/averitec/dev.json`；早期配置的审核开关仍按原版语义解释。
+- `configs/averitec-rq2-five-round-minimax-m31-flash-template.json` 沿用 MiniMax-M3.1-Flash，并以固定种子从 500 题抽取 100 题。`plan` 的任务上界为 6600。正式运行前核对题目子集和预算。
+
+配置只保存凭据环境变量名 `MINIMAX_API_KEY`，不保存密钥。真实模型调用需在终端设置该变量，并使用 `--allow-network`。
+
+## RQ2 五轮补充实验
+
+`configs/rq2-five-round-demo.json` 从合成集按题号和种子选 2 题；`configs/rq2-five-round-real-template.json` 是 AVeriTeC 100 题的通用容量模板。也可将 `subset` 改成 `{"item_ids":["averitec_0001", "averitec_0002"]}`。
+
+```bash
+PYTHONPATH=src python3 -m controlled_mad plan --config configs/rq2-five-round-demo.json
+PYTHONPATH=src python3 -m controlled_mad rq2 --config configs/rq2-five-round-demo.json --run-id rq2-demo --backend mock
+PYTHONPATH=src python3 -m controlled_mad analyze --run-id rq2-demo
+```
+
+首次 `rq2` 命令冻结新的运行，同一命令再次执行会检查配置并续跑；真实服务还需在冻结配置中开启 `network_enabled`，并显式加 `--allow-network`。五轮仅运行 M-O/M-R，T1—T4 是暂定判断，T5 是终局。子集不根据金标或运行结果筛选。报告给出逐轮票额/裁决差、T3→T5 变化及完整五轮配对分母。这个补充实验不输出三轮四格 D；旧三轮 run 不会变成五轮 run。
+
+Windows PowerShell 示例，建议使用短运行目录以减小路径长度：
+
+```powershell
+cd controlled-mad-framework-v1
+$env:PYTHONPATH = "src"
+python -m controlled_mad rq2 --config configs/rq2-five-round-demo.json --run-id rq2-demo --runs-root C:\mad-runs --backend mock
+python -m controlled_mad status --run-id rq2-demo --runs-root C:\mad-runs
+python -m controlled_mad verify --run-id rq2-demo --runs-root C:\mad-runs
+python -m controlled_mad analyze --run-id rq2-demo --runs-root C:\mad-runs
+```
+
+真实运行时在 PowerShell 当前会话设置配置中指定的凭据环境变量；程序不会读取 `.env`。Windows 文件锁和 UTF-8/BOM 路径已适配，目录 fsync 的断电持久化保证依平台而异。
 
 ## 架构与实验约定
 
@@ -54,7 +87,7 @@ flowchart LR
 
 runs/<run_id>/ 保存冻结配置、可见输入、隔离金标、任务、消息、投递、原始响应、各版解析、快照和事件。raw 与派生版本不可覆盖，verify 检查哈希与引用。
 
-resume 只执行 ready 任务；结果未知的请求不自动重发。reparse 不调模型；retry 显式建立新尝试；fork-revision 选定新解析并保留旧运行。
+resume 从保存的任务状态继续执行，传输结果未知时按尝试上限退避重试。reparse 不调模型；retry 显式建立新尝试；fork-revision 选定新解析并保留旧运行。
 
 ## 验证与开发
 

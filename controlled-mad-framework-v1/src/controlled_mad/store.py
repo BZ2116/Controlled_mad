@@ -1,12 +1,12 @@
 """不可覆盖对象与事件日志；单写者锁不会因进程退出留下占用。"""
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 from datetime import datetime, timezone
 from .identity import canonical_bytes, canonical_hash, safe_id
+from .platform_io import exclusive_lock, sync_directory, LockBusy
 
 class IntegrityError(RuntimeError): pass
 COLLECTIONS=('tasks','raw','results','parses','events','snapshots','materials','comparisons','messages','deliveries','inputs','analysis_inputs','exports','reports','attempts')
@@ -28,11 +28,11 @@ class RunStore:
     @contextlib.contextmanager
     def lock(self):
         with (self.path/'.writer.lock').open('a+b') as f:
-            try: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
-            except BlockingIOError: raise IntegrityError('本运行已有写入进程') from None
-            self._event_cache=None
-            try: yield self
-            finally: fcntl.flock(f,fcntl.LOCK_UN)
+            try:
+                with exclusive_lock(f):
+                    self._event_cache=None
+                    yield self
+            except LockBusy: raise IntegrityError('本运行已有写入进程') from None
     def _file(self,collection,key,suffix='.json'):
         if collection not in COLLECTIONS+('',): raise ValueError('未知对象类型')
         safe_id(key)
@@ -43,19 +43,17 @@ class RunStore:
         digest=hashlib.sha256(data).hexdigest()
         if p.exists():
             if not marker.exists(): raise IntegrityError(f'未提交文件需要检查：{p.name}')
-            if marker.read_text()!=digest or p.read_bytes()!=data: raise IntegrityError(f'不可覆盖对象冲突：{p.name}')
+            if marker.read_text(encoding='ascii')!=digest or p.read_bytes()!=data: raise IntegrityError(f'不可覆盖对象冲突：{p.name}')
             return key
         with p.open('xb') as f: f.write(data); f.flush(); os.fsync(f.fileno())
-        with marker.open('x') as f: f.write(digest); f.flush(); os.fsync(f.fileno())
-        fd=os.open(p.parent,os.O_RDONLY)
-        try: os.fsync(fd)
-        finally: os.close(fd)
+        with marker.open('x',encoding='ascii') as f: f.write(digest); f.flush(); os.fsync(f.fileno())
+        sync_directory(p.parent)
         return key
     def read_blob(self,collection,key,suffix='.json'):
         p=self._file(collection,key,suffix); marker=Path(str(p)+'.committed')
         if not p.exists(): raise FileNotFoundError(p)
         data=p.read_bytes()
-        if not marker.exists() or marker.read_text()!=hashlib.sha256(data).hexdigest(): raise IntegrityError(f'提交标记或哈希错误：{p.name}')
+        if not marker.exists() or marker.read_text(encoding='ascii')!=hashlib.sha256(data).hexdigest(): raise IntegrityError(f'提交标记或哈希错误：{p.name}')
         return data
     def put(self,collection,key,obj): return self.write_blob(collection,key,canonical_bytes(obj))
     def get(self,collection,key): return json.loads(self.read_blob(collection,key))
