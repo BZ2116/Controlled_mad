@@ -1,0 +1,6 @@
+{"dataset_id": "toy-four", "item_id": "toy-001", "claim": "Synthetic claim 1.", "evidence": ["Synthetic evidence 1; no real-world inference."], "labels": ["A", "B", "C", "D"], "gold": "A"}
+{"dataset_id": "toy-four", "item_id": "toy-002", "claim": "Synthetic claim 2.", "evidence": ["Synthetic evidence 2; no real-world inference."], "labels": ["A", "B", "C", "D"], "gold": "A"}
+{"dataset_id": "toy-four", "item_id": "toy-003", "claim": "Synthetic claim 3.", "evidence": ["Synthetic evidence 3; no real-world inference."], "labels": ["A", "B", "C", "D"], "gold": "A"}
+{"dataset_id": "toy-four", "item_id": "toy-004", "claim": "Synthetic claim 4.", "evidence": ["Synthetic evidence 4; no real-world inference."], "labels": ["A", "B", "C", "D"], "gold": "A"}
+{"dataset_id": "toy-four", "item_id": "toy-005", "claim": "Synthetic claim 5.", "evidence": ["Synthetic evidence 5; no real-world inference."], "labels": ["A", "B", "C", "D"], "gold": "A"}
+{"dataset_id": "toy-binary", "item_id": "toy-006", "claim": "Synthetic claim 6.", "evidence": ["Synthetic evidence 6; no real-world inference."], "labels": ["yes", "no"], "gold": "yes"}

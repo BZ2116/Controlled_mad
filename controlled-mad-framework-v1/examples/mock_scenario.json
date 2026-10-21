@@ -1,0 +1,153 @@
+{
+  "items": {
+    "toy-001": {
+      "s0": [
+        "A",
+        "A",
+        "A"
+      ],
+      "comment": "The evidence provides support. However, a limitation remains. This is my initial conclusion.",
+      "blocks": [
+        {
+          "text": "The evidence provides support. ",
+          "kind": "support"
+        },
+        {
+          "text": "However, a limitation remains. ",
+          "kind": "limitation"
+        },
+        {
+          "text": "This is my initial conclusion.",
+          "kind": "conclusion"
+        }
+      ],
+      "rounds": {
+        "ethos/M/2": [
+          "B",
+          "B",
+          "A"
+        ],
+        "ethos/M/3": [
+          "A",
+          "A",
+          "B"
+        ],
+        "O/M/2": [
+          "A",
+          "A",
+          "A"
+        ],
+        "O/M/3": [
+          "A",
+          "A",
+          "A"
+        ]
+      }
+    },
+    "toy-002": {
+      "s0": [
+        "A",
+        "A",
+        "B"
+      ],
+      "comment": "The evidence provides support. However, a limitation remains. This is my initial conclusion.",
+      "blocks": [
+        {
+          "text": "The evidence provides support. ",
+          "kind": "support"
+        },
+        {
+          "text": "However, a limitation remains. ",
+          "kind": "limitation"
+        },
+        {
+          "text": "This is my initial conclusion.",
+          "kind": "conclusion"
+        }
+      ]
+    },
+    "toy-003": {
+      "s0": [
+        "A",
+        "B",
+        "C"
+      ],
+      "comment": "The evidence provides support. However, a limitation remains. This is my initial conclusion.",
+      "blocks": [
+        {
+          "text": "The evidence provides support. ",
+          "kind": "support"
+        },
+        {
+          "text": "However, a limitation remains. ",
+          "kind": "limitation"
+        },
+        {
+          "text": "This is my initial conclusion.",
+          "kind": "conclusion"
+        }
+      ]
+    },
+    "toy-004": {
+      "s0": [
+        "A",
+        "A",
+        "A"
+      ],
+      "comment": "Only a supporting point is provided.",
+      "blocks": [
+        {
+          "text": "Only a supporting point is provided.",
+          "kind": "support"
+        }
+      ]
+    },
+    "toy-005": {
+      "s0": [
+        "A",
+        "B",
+        "B"
+      ],
+      "comment": "The evidence provides support. However, a limitation remains. This is my initial conclusion.",
+      "blocks": [
+        {
+          "text": "The evidence provides support. ",
+          "kind": "support"
+        },
+        {
+          "text": "However, a limitation remains. ",
+          "kind": "limitation"
+        },
+        {
+          "text": "This is my initial conclusion.",
+          "kind": "conclusion"
+        }
+      ],
+      "audits": {
+        "pathos": "uncertain"
+      }
+    },
+    "toy-006": {
+      "s0": [
+        "yes",
+        "no",
+        "no"
+      ],
+      "comment": "The evidence provides support. However, a limitation remains. This is my initial conclusion.",
+      "blocks": [
+        {
+          "text": "The evidence provides support. ",
+          "kind": "support"
+        },
+        {
+          "text": "However, a limitation remains. ",
+          "kind": "limitation"
+        },
+        {
+          "text": "This is my initial conclusion.",
+          "kind": "conclusion"
+        }
+      ]
+    }
+  }
+}
