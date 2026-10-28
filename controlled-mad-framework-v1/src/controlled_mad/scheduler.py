@@ -8,14 +8,26 @@ from .s0 import freeze_s0
 from .history import extend_history, with_reply
 from .router import route
 from .interventions import resolve_rule
+from .pipeline import item_pipeline_enabled, freeze_item_materials
+from .protocol import load_amendment, item_settings, SINGLE_PASS, EQUAL_ROUNDS
+
+def complete_arm(arm): return all(snapshot for states in arm.values() for snapshot in states.values())
 
 class Planner:
     def __init__(self,store,persist=True):
         self.store=store; self.config=store.config
         self.persist=persist
+        self.amendment=load_amendment(store)
         self.prompts=store.get('inputs','prompts')
         self.selected=store.selection(); self.parse_cache={}; self.tasks={}
         self.materials=[]; self.comparisons=[]; self.series=[]; self.blocked=[]
+        self.material_freeze=(store.get('inputs','material-freeze')
+                              if self.config.get('material_gate') and (store.path/'inputs'/'material-freeze.json').exists() else None)
+        self.item_pipeline=item_pipeline_enabled(store)
+        self.intervention_items=(set(store.get('inputs','intervention-subset')['selected_item_ids'])
+                                 if self.config.get('intervention_subset') else None)
+    def settings(self,context):
+        return item_settings(self.config,self.amendment,context['dataset_id'],context['item_id'])
     def put(self,collection,key,value):
         if self.persist: self.store.put(collection,key,value)
     def remember_message(self,message):
@@ -100,10 +112,11 @@ class Planner:
             return result
         result={'I':{'1':first},'M':{'1':first},'interventions':{}}
         for protocol in ('I','M'):
+            if protocol=='I' and self.settings(base)['independent_rounds']==1: continue
             second=self.round(base,2,protocol,first)
             third=self.round(base,3,protocol,second)
             result[protocol].update({'2':second,'3':third})
-        if batch=='main':
+        if batch=='main' and (self.intervention_items is None or item.item_id in self.intervention_items):
             for intervention in self.config['interventions']:
                 rule=resolve_rule(intervention,s0.sender)
                 if rule['round']==2:
@@ -113,7 +126,9 @@ class Planner:
                     second=result['M']['2']
                     third=self.round(base,3,'M',second,rule)
                 result['interventions'][rule['id']]={'1':first,'2':second,'3':third}
-        self.series.append({'context':base,'states':result})
+        design=self.settings(base)['design']
+        series_context=({**base,'design':design} if design in (SINGLE_PASS,EQUAL_ROUNDS) else base)
+        self.series.append({'context':series_context,'states':result})
         return result
     def refresh_item(self,item_key):
         """仅重建发生变化的题目；题间无依赖，保留其他题目的完整视图。"""
@@ -129,16 +144,22 @@ class Planner:
             setattr(self,name,retained+getattr(updated,name))
         return self
 
-    def build(self,item_key=None):
+    def build(self,item_key=None,progress=None):
         from .materials import prepare_materials
-        for raw in self.store.get('inputs','items')['items']:
+        rows=self.store.get('inputs','items')['items']
+        for index,raw in enumerate(rows,1):
             if item_key is not None and (raw['dataset_id'],raw['item_id'])!=item_key: continue
+            if progress: progress({'item_id':raw['item_id'],'item_position':index,'item_total':len(rows)})
             item=Item(raw['dataset_id'],raw['item_id'],raw['claim'],tuple(raw['evidence']),tuple(raw['labels']),raw.get('task_input',''),tuple(tuple(pair) for pair in raw.get('metadata',())))
             for model in self.config['debate_models']:
                 base={'dataset_id':item.dataset_id,'item_id':item.item_id,'model_id':model,'s0_batch':self.config['s0_batch'],'labels':list(item.labels)}
                 tasks=[]
                 for agent in AGENTS:
-                    tasks.append(self.make('S0',model,self.prompt('s0',{'task_input':item.task_input,'allowed_labels':list(item.labels)}),(),{**base,'agent':agent,'round':0}))
+                    ctx={**base,'agent':agent,'round':0}
+                    if self.config.get('complete_matrix'):
+                        from .matrix import STRUCTURE
+                        ctx['comment_structure']=STRUCTURE
+                    tasks.append(self.make('S0',model,self.prompt('s0',{'task_input':item.task_input,'allowed_labels':list(item.labels)}),(),ctx))
                 responses=[self.result(t.task_id) for t in tasks]
                 if not all(responses):
                     self.blocked.append({**base,'stage':'materials','reason':'S0 三份有效回复尚未齐备'})
@@ -149,24 +170,39 @@ class Planner:
                 self.put('snapshots',s0.s0_hash,{'kind':'frozen_s0',**frozen,'votes':plain(votes)})
                 materials=prepare_materials(self,item,s0,frozen)
                 self.materials.extend(materials)
+                if self.config.get('complete_matrix') and any(m['status']!='eligible' for m in materials):
+                    self.blocked.append({**base,'stage':'T1','reason':'完整矩阵要求7种变体全部合格且互异，缺失不能跳过'})
+                    continue
+                if self.item_pipeline and not any(m['status']=='pending' for m in materials):
+                    freeze_item_materials(self.store,frozen,materials,self.persist)
+                if self.config.get('material_gate'):
+                    if self.material_freeze is None and not self.item_pipeline:
+                        self.blocked.append({**base,'stage':'T1','reason':'全体材料结束后须 freeze-materials 冻结资格清单'})
+                        continue
+                    if self.material_freeze is not None and any(m['material_id'] not in self.material_freeze['material_ids'] for m in materials):
+                        raise ValueError('材料或 S0 已偏离冻结资格清单，请建立新运行，不能在原运行重新入组')
                 if any(m['status']=='pending' for m in materials):
                     self.blocked.append({**base,'stage':'T1','reason':'材料生成/审核尚未结束'})
                     continue
                 accepted=[m for m in materials if m['status']=='eligible']
                 original=votes[AGENTS.index(s0.sender)].comment
-                for repeat in range(self.config['repeats']):
+                for repeat in range(self.settings(base)['repeats']):
                     if not accepted: break
                     o=self.arm(item,s0,frozen,original,'O',repeat)
                     for material in accepted:
                         r=self.arm(item,s0,frozen,material['rewritten'],material['operation'],repeat)
                         context={**frozen,'operation':material['operation'],'repeat':repeat,'material_id':material['material_id']}
+                        if self.settings(base)['design'] in (SINGLE_PASS,EQUAL_ROUNDS): context['design']=self.settings(base)['design']
                         comparison={'context':context,'O':o,'R':r}
                         cid=canonical_hash([context,material['material_id']]); comparison['comparison_id']=cid
                         self.comparisons.append(comparison)
                         refs=lambda arm:{p:{t:s['snapshot_id'] if s else None for t,s in states.items()} for p,states in arm.items() if p in ('I','M')}
-                        # 持久化不可变快照引用；完成状态变化产生新对象，不覆盖旧版本。
+                        # 只落盘 O、R 都跑满的版本。build() 每次重建都会重跑这一段，
+                        # 连半成品一起写，落盘集合就成了调度时序的函数：中断续跑会攒出一批
+                        # 单次跑完永远不会有的中间版本，内容寻址因此失去可复现性。
                         view={'comparison_id':cid,'context':context,'O':refs(o),'R':refs(r)}
-                        self.put('comparisons',canonical_hash(view),view)
+                        if complete_arm(view['O']) and complete_arm(view['R']):
+                            self.put('comparisons',canonical_hash(view),view)
                 oo=self.config['diagnostics']['oo']
                 if oo['enabled']:
                     for repeat in range(oo['repeats']):
@@ -175,3 +211,4 @@ class Planner:
 
 def advance(run):
     return tuple(Planner(run).build().tasks.values())
+

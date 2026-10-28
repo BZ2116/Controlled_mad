@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "adapter": "averitec",
+    "source": "../datasets/averitec/dev.json"
+  },
+  "profiles": {
+    "minimax_m31_flash": {
+      "provider": "openai",
+      "model": "MiniMax-M3.1-Flash",
+      "expected_model": "MiniMax-M3.1-Flash",
+      "base_url": "https://api.minimaxi.com/v1",
+      "credential_env": "MINIMAX_API_KEY",
+      "temperature": 0.0,
+      "max_tokens": 16384,
+      "max_tokens_field": "max_tokens",
+      "reasoning_effort": "max",
+      "seed": null,
+      "supports_seed": false,
+      "context_limit": 128000,
+      "timeout": 180
+    }
+  },
+  "debate_models": [
+    "minimax_m31_flash"
+  ],
+  "material_model": "minimax_m31_flash",
+  "audit_model": "minimax_m31_flash",
+  "material_audit": true,
+  "s0_batch": "s0-v10-rq3-001",
+  "selection_seed": 42,
+  "repeats": 3,
+  "history_policy": "full",
+  "message_order": [
+    "agent_1",
+    "agent_2",
+    "agent_3"
+  ],
+  "operations": [
+    "ethos",
+    "logos",
+    "pathos",
+    "conclusion_front",
+    "conclusion_back",
+    "support_first",
+    "limitation_first"
+  ],
+  "interventions": [
+    {
+      "rule_id": "A_to_B_T3",
+      "source_agent": "A",
+      "target_agent": "B",
+      "delivery_round": 3
+    }
+  ],
+  "diagnostics": {
+    "oo": {
+      "enabled": false,
+      "repeats": 1
+    }
+  },
+  "max_generation_attempts": 1,
+  "max_attempts": 3,
+  "budget": {
+    "max_calls": 54000,
+    "max_tokens": 6912000000,
+    "stage_calls": {
+      "S0": 360,
+      "generate": 360,
+      "annotate": 120,
+      "audit": 840,
+      "T1": 8640,
+      "T2": 17280,
+      "T3": 25920
+    }
+  },
+  "network_enabled": true,
+  "mock_scenario": null,
+  "material_policy": "strict_v10",
+  "material_gate": true,
+  "inference": {
+    "resamples": 1999,
+    "seed": 20261022,
+    "alpha": 0.05
+  },
+  "coding": {
+    "size": 50,
+    "seed": 20261022
+  },
+  "subset": {
+    "size": 100,
+    "seed": 20261022
+  }
+}

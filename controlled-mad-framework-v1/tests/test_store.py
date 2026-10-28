@@ -26,3 +26,12 @@ class Storage(unittest.TestCase):
     def test_events(self):
         self.store.event('selected',task_id='a',parse_id='p')
         self.assertEqual(self.store.selection()['a'],'p')
+    def test_verification_reports_progress_and_still_detects_corruption(self):
+        self.store.put('tasks','a',{'x':1})
+        updates=[]
+        report=self.store.verify(progress=updates.append)
+        self.assertEqual(report['verified_objects'],2)
+        self.assertEqual(updates[-1]['verified_objects'],2)
+        self.assertTrue(any(u.get('collection')=='tasks' for u in updates))
+        (self.store.path/'tasks/a.json.committed').write_text('incorrect',encoding='ascii')
+        with self.assertRaises(IntegrityError): self.store.verify(progress=updates.append)

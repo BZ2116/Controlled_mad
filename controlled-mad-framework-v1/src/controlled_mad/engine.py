@@ -1,5 +1,6 @@
 """所有阶段共用的执行、提交和恢复入口。默认不连接真实服务。"""
-import json, os, shutil, time
+import json, os, shutil, threading, time
+from concurrent import futures
 from importlib.resources import files
 from collections import Counter
 from pathlib import Path
@@ -16,22 +17,30 @@ from .subset import select_bundle
 from .backends.mock import MockBackend
 from .backends.openai_compatible import OpenAIBackend
 from .backends.anthropic_compatible import AnthropicBackend
-from .backends.transport import TransportUnknown
+from .backends.transport import TransportUnknown, RetryableHTTP, retryable_status, retry_after_deadline
 from .progress import progress_snapshot, transition
 
 ROOT=Path(__file__).resolve().parents[2]
+
+# 服务端明确拒绝或未受理的尝试不消耗任务重试额度：请求没有生效，凭空扣掉 max_attempts
+# 会让该题被永久 defer，白白从四格分析里消失。预算侧仍照常计这次真实请求。
+NON_CHARGEABLE_FAILURES=('backend rejected configuration','rate limited or server error')
 
 def create_run(config_path,run_id,root=None):
     c=load_config(config_path)
     adapter=adapter_for(c['dataset']['adapter'])
     bundle=adapter.load(c['dataset']['source'])
     subset_record=None
-    if c.get('experiment')=='rq2_five_round': bundle,subset_record=select_bundle(bundle,c['subset'])
+    if c.get('subset'): bundle,subset_record=select_bundle(bundle,c['subset'])
     if not bundle.items: raise ValueError('数据集中没有可运行题目，请检查拒绝分母')
     names=('s0','debate','rhetoric','audit','annotate')
     overrides=c.get('prompts',{})
     if set(overrides)-set(names): raise ValueError('未知提示名称')
     templates={name:(Path(config_path).resolve().parent/overrides[name]).read_text(encoding='utf-8-sig') if name in overrides else files('controlled_mad').joinpath('resources',f'{name}.v1.txt').read_text(encoding='utf-8') for name in names}
+    if c.get('complete_matrix'):
+        for name in ('s0','rhetoric'):
+            if name not in overrides:
+                templates[name]=files('controlled_mad').joinpath('resources',f'{name}.matrix-v1.txt').read_text(encoding='utf-8')
     if c.get('experiment')=='rq2_five_round' and 'debate' not in overrides:
         templates['debate']=files('controlled_mad').joinpath('resources','debate.rq2-five-round.txt').read_text(encoding='utf-8')
     scenario=json.loads(Path(c['mock_scenario']).read_text(encoding='utf-8-sig')) if c.get('mock_scenario') else {'items':{}}
@@ -46,16 +55,27 @@ def create_run(config_path,run_id,root=None):
         store.put('analysis_inputs','gold',{'gold':plain(bundle.gold)})
         store.put('inputs','prompts',templates)
         store.put('inputs','mock',scenario)
+        if c.get('material_policy')=='strict_v10':
+            from .visibility import visibility_matrix
+            store.put('inputs','visibility-plan',{'matrix':visibility_matrix(c)})
+        for name,setting in (('coding-plan','coding'),('intervention-subset','intervention_subset')):
+            if c.get(setting):
+                _,record=select_bundle(bundle,c[setting])
+                if setting=='coding':
+                    from .coding import CODEBOOK
+                    record['codebook']=CODEBOOK
+                store.put('inputs',name,record)
         store.write_blob('inputs','items',b''.join(canonical_bytes(i)+b'\n' for i in bundle.items),'.jsonl')
         store.write_blob('analysis_inputs','gold',b''.join(canonical_bytes(g)+b'\n' for g in bundle.gold),'.jsonl')
         store.event('initialized',source_hash=bundle.source_hash)
         Planner(store).build()
     return store
 
-def backend_for(store,task,on_raw=None):
+def backend_for(store,task,on_raw=None,scenario=None,retry_http=False):
     provider=profile(store.config,task.profile_id).provider
-    if provider=='mock': return MockBackend(store.get('inputs','mock'),on_raw)
-    return OpenAIBackend(on_raw=on_raw) if provider=='openai' else AnthropicBackend(on_raw=on_raw)
+    if provider=='mock': return MockBackend(scenario if scenario is not None else store.get('inputs','mock'),on_raw)
+    backend=OpenAIBackend if provider=='openai' else AnthropicBackend
+    return backend(on_raw=on_raw,retry_http=retry_http)
 
 def load_task(store,task_id):
     t=store.get('tasks',task_id)
@@ -65,7 +85,11 @@ def parse_result(task,result,version):
     if result.error: return {'valid':False,'value':None,'error':result.error}
     try:
         if task.stage in ('S0','T1','T2','T3','T4','T5','generate'):
-            return parse_vote(result.text,tuple(task.context['labels']),version)
+            parsed=parse_vote(result.text,tuple(task.context['labels']),version)
+            if parsed['valid'] and task.stage=='S0' and task.context.get('comment_structure'):
+                from .matrix import structured_blocks
+                structured_blocks(parsed['value']['comment'])
+            return parsed
         if task.stage=='annotate':
             value=json_object(result.text)
             if set(value)!={'blocks'} or not isinstance(value['blocks'],list): raise ValueError('原文注释缺少 blocks')
@@ -108,18 +132,38 @@ def chargeable_attempts(store,task_id,preflight_failures=None):
     """旧版在请求前失败也写入 started；这类尝试不占网络重试额度。"""
     if preflight_failures is None:
         preflight_failures={e['attempt_id'] for e in store.all('events') if e['kind']=='transport_unknown'
-                            and e.get('reason')=='backend rejected configuration'}
+                            and e.get('reason') in NON_CHARGEABLE_FAILURES}
     return sum(a['attempt_id'] not in preflight_failures for a in store.attempts(task_id))
 
 def check_credential(p):
     if p.provider!='mock' and not os.environ.get(p.credential_env):
         raise ValueError(f'凭据环境变量未设置：{p.credential_env}；请先在当前终端加载密钥，再续跑')
 
-def recover(store):
+def _record_http_retry(store,task,aid,receipt):
+    # 恢复可反复调用；已存在的失败记录和等待截止时间不能每次续跑都向后推。
+    if any(e['kind']=='transport_unknown' and e.get('attempt_id')==aid
+           and e.get('reason')=='rate limited or server error' for e in store.all('events')):
+        return
+    deadline=retry_after_deadline(receipt['headers'],receipt.get('received_at',time.time()))
+    store.event('transport_unknown',task_id=task.task_id,attempt_id=aid,
+                reason='rate limited or server error',http_status=receipt['status'],
+                **({'retry_not_before':deadline} if deadline is not None else {}))
+
+
+def recover(store,progress=None):
+    store._ensure_events(progress=progress)
     recovered=[]; events=store.all('events'); selected=store.selection()
     finished={e['attempt_id'] for e in events if e['kind']=='finished'}
     for start in (e for e in events if e['kind']=='started' and e['attempt_id'] not in finished):
         aid=start['attempt_id']; task=load_task(store,start['task_id'])
+        receiptfile=store.path/'attempts'/f'{aid}.receipt.json'
+        receipt=store.get('attempts',aid+'.receipt') if receiptfile.exists() else None
+        # 新尝试记录请求时的策略；老尝试回溯其开始前最后一条 execution_policy。
+        policy=next((e for e in reversed(events) if e['kind']=='execution_policy' and e['sequence']<start['sequence']),{})
+        retry_http=start.get('retry_http',policy.get('retry_http',False))
+        if receipt and retry_http and retryable_status(receipt['status']):
+            _record_http_retry(store,task,aid,receipt)
+            continue
         rawfile=store.path/'raw'/f'{aid}.bin'
         if not rawfile.exists(): continue
         raw=store.read_blob('raw',aid,'.bin')
@@ -129,47 +173,218 @@ def recover(store):
             if start.get('wire_format')=='text': result=ModelResult(raw,raw.decode('utf-8'),None,'manual',None)
             else:
                 backend=backend_for(store,task); p=profile(store.config,task.profile_id)
-                receiptfile=store.path/'attempts'/f'{aid}.receipt.json'
-                if receiptfile.exists() and p.provider!='mock':
-                    receipt=store.get('attempts',aid+'.receipt')
+                if receipt and p.provider!='mock':
                     result=backend.decode_received(raw,p,receipt['status'],receipt['headers'])
                 else: result=backend.decode(raw,p)
         record_result(store,task,result,aid)
         recovered.append(aid)
     return recovered
 
-def execute_ready(store,allow_network=False,max_calls=None,backend_override=None,progress=None,auto_retry_unknown=False):
-    completed=0
-    issued=0
-    consecutive_failures=0
+def execute_ready(store,allow_network=False,max_calls=None,backend_override=None,progress=None,auto_retry_unknown=False,concurrency=1,retry_http=False,item_pipeline=False,single_pass=False,question_batch_size=None,continue_on_error=False):
+    """按题并发、题内串行地推进任务状态机。
+
+    并发的合法性来自 scheduler 的「题间无依赖」：task_id 是含 item_id 的内容寻址哈希，
+    因此并发与串行产出的 task/parse/snapshot/material/comparison 集合完全一致。
+
+    三条不变量，任何改动都必须维持：
+    1. 一个 worker 独占一道题，题内任务严格按序；绝不把同一题拆给多个 worker。
+    2. HTTP 调用不持 store 互斥锁；预算预留、started 事件、结果落盘各自成临界区。
+    3. 每轮只在调度段算一次 overall 快照，且必须等所有 worker join 后才开下一轮，
+       否则 transition() 会跨快照边界把计数推成负数。
+    """
+    if type(concurrency) is not int or concurrency<1: raise ValueError('并发度必须是正整数')
+    if single_pass and store.config.get('matrix_protocol')=='equal_rounds_v10':
+        raise ValueError('等轮次完整矩阵不能启用单轮I协议变更')
+    if question_batch_size is not None and (type(question_batch_size) is not int or question_batch_size<1 or not store.config.get('complete_matrix')):
+        raise ValueError('题目批次大小必须为正整数，且仅用于完整矩阵实验')
+    completed=[0]
+    issued=[0]
+    # 连续失败是全运行口径：6 次连续未决说明服务不可用，而不是这道题的材料不合格。
+    # 一旦任何题成功就清零，因此单题反复重试不会把别的题一起拖停。
+    failures=[0]
+    slot_lock=threading.Lock()
     deferred=set()
     overall=None
     graph=None
-    current_item=None
+    refreshed=set()
+    stop_reason=None
     item_key=lambda task:(task.context['dataset_id'],task.context['item_id'])
     item_order={(row['dataset_id'],row['item_id']):index for index,row in enumerate(store.get('inputs','items')['items'])}
+    scenario=store.get('inputs','mock')
     def report(event,**details):
-        if progress is not None: progress({'event':event,'completed':completed,'overall':overall,**details})
-    report('prepare',stage='等待运行锁并核验记录')
+        if progress is not None: progress({'event':event,'completed':completed[0],'overall':overall,**details})
+    def run_item(key,tasks,states,preflight_failures):
+        """题内串行执行一道题的 ready 任务；返回 (stop_reason, task_id, detail) 或 None。"""
+        for task in tasks:
+            p=profile(store.config,task.profile_id)
+            if backend_override=='mock' and p.provider!='mock': raise ValueError('不能用 mock 替换冻结的真实后端')
+            if p.provider!='mock' and not (allow_network and store.config['network_enabled']): raise BudgetError('真实调用需要冻结网络开关及 --allow-network')
+            check_credential(p)
+            delay=0
+            retry_unknown=states.get(task.task_id)=='transport_unknown'
+            with store._mutex:
+                attempts=store.attempts(task.task_id)
+                if retry_unknown:
+                    delay=min(30,5*2**min(3,max(0,len(attempts)-1)))
+                if attempts:
+                    latest=attempts[-1]['attempt_id']
+                    failure=next((e for e in reversed(store.all('events')) if e['kind']=='transport_unknown' and e.get('attempt_id')==latest),{})
+                    delay=max(delay,failure.get('retry_not_before',0)-time.time())
+            if delay:
+                if continue_on_error and delay>60:
+                    return ('transport_unknown',task.task_id,'服务要求等待超过60秒；已保存截止时间，稍后续跑')
+                # 退避必须在锁外睡，否则会把其他 worker 的落盘一起堵住。
+                report('retry_wait',seconds=delay,stage=task.stage,item_id=task.context.get('item_id',''),agent=task.context.get('agent',''))
+                time.sleep(delay)
+            with store._mutex:
+                if max_calls is not None:
+                    with slot_lock:
+                        if issued[0]>=max_calls: return None
+                if retry_unknown:
+                    store.event('retry_requested',task_id=task.task_id,attempt_id=f'{task.task_id}-a{len(store.attempts(task.task_id))+1:03d}',reason='传输异常自动退避重试')
+                    transition(overall,task.stage,'transport_unknown','ready')
+                reserved=Budget(store).reserve(task,p)
+                if chargeable_attempts(store,task.task_id,preflight_failures)>=store.config['max_attempts']: raise BudgetError('该槽位已达到尝试上限')
+                aid=f'{task.task_id}-a{len(store.attempts(task.task_id))+1:03d}'
+                store.event('started',task_id=task.task_id,attempt_id=aid,stage=task.stage,provider=p.provider,reserved_tokens=reserved,wire_format=p.provider,retry_http=retry_http)
+                with slot_lock: issued[0]+=1
+                transition(overall,task.stage,'ready','running')
+                report('start',stage=task.stage,item_id=task.context.get('item_id',''),agent=task.context.get('agent',''),
+                       task_id=task.task_id,item_position=item_order[key]+1)
+            def commit_received(raw,http_status,headers):
+                with store._mutex:
+                    store.put('attempts',aid+'.receipt',{'status':http_status,'headers':headers,'received_at':time.time()})
+                    store.write_blob('raw',aid,raw,'.bin')
+            try: result=backend_for(store,task,on_raw=commit_received,scenario=scenario,retry_http=retry_http).generate(task,p)
+            except (TransportUnknown,TimeoutError,OSError) as error:
+                with store._mutex:
+                    if isinstance(error,RetryableHTTP):
+                        _record_http_retry(store,task,aid,store.get('attempts',aid+'.receipt'))
+                    else:
+                        store.event('transport_unknown',task_id=task.task_id,attempt_id=aid)
+                    transition(overall,task.stage,'running','transport_unknown')
+                    failures[0]+=1
+                    unavailable=failures[0]>=6
+                # 放弃本轮：让其他 worker 跑完，下一轮调度段会重新排到这道题并退避重试。
+                if auto_retry_unknown and not unavailable: return None
+                return ('transport_unknown',task.task_id,None)
+            except ValueError:
+                # 调用前凭据/配置失败亦保守记为未决，不打印可能携带请求信息的异常正文。
+                with store._mutex:
+                    store.event('transport_unknown',task_id=task.task_id,attempt_id=aid,reason='backend rejected configuration')
+                    transition(overall,task.stage,'running','transport_unknown')
+                raise ValueError('后端配置或凭据检查失败；状态已记录，请检查配置') from None
+            with store._mutex:
+                parsed=record_result(store,task,result,aid)
+                completed[0]+=1
+                failures[0]=failures[0]+1 if result.error else 0
+                transition(overall,task.stage,'running','succeeded' if parsed['valid'] else 'invalid')
+                report('finish',stage=task.stage,item_id=task.context.get('item_id',''),agent=task.context.get('agent',''),state='succeeded' if parsed['valid'] else 'invalid',
+                       task_id=task.task_id,item_position=item_order[key]+1)
+                if result.error:
+                    global_error=failure_policy.global_backend_error(result.error) or failures[0]>=6
+                    if not continue_on_error or global_error: return ('backend_error',task.task_id,result.error)
+        return None
+    def run_plans(plans,states,preflight_failures):
+        """worker 抛出的异常必须回到主线程，否则会退化成静默的部分失败。"""
+        if len(plans)==1: return [run_item(*plans[0],states,preflight_failures)]
+        outcomes=[]; error=None
+        with futures.ThreadPoolExecutor(max_workers=len(plans)) as pool:
+            submitted=[pool.submit(run_item,key,tasks,states,preflight_failures) for key,tasks in plans]
+            for pending in submitted:
+                try: outcomes.append(pending.result())
+                except BaseException as exc:
+                    if error is None: error=exc
+                    for other in submitted: other.cancel()
+        if error is not None: raise error
+        return outcomes
+    report('prepare',stage='获取运行锁')
     with store.lock():
-        store.verify()
-        report('prepare',stage='恢复已收到的响应')
-        recover(store)
+        from . import failures as failure_policy
+        continue_on_error=failure_policy.enabled(store,continue_on_error)
+        if continue_on_error and not store.config.get('complete_matrix'):
+            raise ValueError('逐题容错策略仅适用于完整矩阵实验')
+        manifest=store.get('','manifest')
+        if manifest['config_hash']!=canonical_hash(store.config): raise IntegrityError('配置冻结哈希不匹配')
+        report('prepare',stage='已取得运行锁，读取断点索引并恢复未完成响应')
+        recover(store,progress=lambda u:report('prepare',stage=(
+            '读取断点索引' if u.get('source')=='checkpoint' else '首次建立断点索引：仅回放历史事件')+
+            f" {u['loaded']}/{u['total']} 条"))
+        store.save_checkpoint()
+        from .pipeline import enable_item_pipeline, item_pipeline_enabled
+        if item_pipeline or store.config.get('complete_matrix'): enable_item_pipeline(store)
+        pipeline=item_pipeline_enabled(store)
+        if single_pass:
+            report('prepare',stage='登记单次运行变更并保留已完成题')
+            from .protocol import enable_single_pass
+            enable_single_pass(store)
         if max_calls!=0:
-            store.event('execution_policy',scheduling='item_first_v1',auto_retry_unknown=auto_retry_unknown)
+            store.event('execution_policy',scheduling='item_first_v1',auto_retry_unknown=auto_retry_unknown,concurrency=concurrency,retry_http=retry_http,
+                        material_gate='per_item' if pipeline else 'configured',recovery_mode='checkpoint_v1',question_batch_size=question_batch_size,
+                        continue_on_error=continue_on_error)
         report('prepare',stage='查找可执行任务')
-        while max_calls is None or issued<max_calls:
-            graph=Planner(store).build() if graph is None else graph.refresh_item(current_item)
+        last_planning=[0]
+        def planning(update):
+            now=time.monotonic()
+            if now-last_planning[0]>=0.5 or update['item_position']==update['item_total']:
+                report('prepare',stage=f"恢复任务图：第{update['item_position']}/{update['item_total']}题 {update['item_id']}")
+                last_planning[0]=now
+        while max_calls is None or issued[0]<max_calls:
+            if graph is None: graph=Planner(store,persist=not pipeline).build(progress=planning)
+            else:
+                # 只刷新上一轮真正跑过的题：别的题没有 worker 写过，视图不会过期。
+                for key in sorted(refreshed,key=lambda k:item_order[k]): graph.refresh_item(key)
             events=store.all('events'); selected=store.selection()
             preflight_failures={e['attempt_id'] for e in events if e['kind']=='transport_unknown'
-                                and e.get('reason')=='backend rejected configuration'}
+                                and e.get('reason') in NON_CHARGEABLE_FAILURES}
             states={tid:task_state(store,tid,events,selected) for tid in graph.tasks}
+            if continue_on_error:
+                adopted=failure_policy.adopt_valid_repairs(store,graph,states)
+                if adopted:
+                    refreshed=adopted
+                    report('prepare',stage=f'已自动采用{len(adopted)}题的有效重试回复')
+                    continue
             overall=progress_snapshot(store,graph,states)
+            allowed=None
+            skipped=failure_policy.skipped_items(store) if continue_on_error else {}
+            complete={}
+            if question_batch_size or continue_on_error:
+                from .matrix import result_matrix
+                complete={key:True for key in item_order}
+                for row in result_matrix(store,graph):
+                    if row['status']!='complete': complete[(row['dataset_id'],row['item_id'])]=False
+                ordered=list(item_order)
+                size=question_batch_size or len(ordered)
+                for offset in range(0,len(ordered),size):
+                    batch=ordered[offset:offset+size]
+                    if not all(complete[key] or key in skipped for key in batch):
+                        allowed=set(batch)
+                        overall['items']['batch']={'index':offset//size+1,
+                            'total':(len(ordered)+size-1)//size,
+                            'start':offset+1,'end':offset+len(batch),'complete':sum(complete[key] for key in batch),
+                            'skipped':sum(key in skipped and not complete[key] for key in batch),'size':len(batch)}
+                        break
+            if continue_on_error:
+                fatal=failure_policy.exhausted_global_failure(store,graph,states,allowed,preflight_failures)
+                if fatal:
+                    report('stop',reason='backend_error',task_id=fatal)
+                    return {'executed':completed[0],'stop':'backend_error','task_id':fatal,'reason':'全局服务错误已达尝试上限，保留断点而非跳过题目'}
+                queued=failure_policy.queue_invalid_retries(store,graph,states,allowed,complete,preflight_failures)
+                if queued:
+                    refreshed=queued
+                    report('prepare',stage=f'已登记{len(queued)}题的有限格式重试')
+                    continue
             ready=[t for t in graph.tasks.values() if states[t.task_id]=='ready']
             unknown=[tid for tid,state in states.items() if state=='transport_unknown']
+            if skipped:
+                ready=[t for t in ready if item_key(t) not in skipped]
+                unknown=[tid for tid in unknown if item_key(graph.tasks[tid]) not in skipped]
+            if allowed is not None:
+                ready=[t for t in ready if item_key(t) in allowed]
+                unknown=[tid for tid in unknown if item_key(graph.tasks[tid]) in allowed]
             if unknown and not auto_retry_unknown:
                 report('stop',reason='transport_unknown',task_id=unknown[0])
-                return {'executed':completed,'stop':'transport_unknown','tasks':unknown}
+                return {'executed':completed[0],'stop':'transport_unknown','tasks':unknown}
             retry=[]
             for tid in unknown:
                 if chargeable_attempts(store,tid,preflight_failures)<store.config['max_attempts']:
@@ -179,67 +394,54 @@ def execute_ready(store,allow_network=False,max_calls=None,backend_override=None
                     store.event('retry_exhausted',task_id=tid,reason='保留未知结果，继续其他可执行任务')
                     report('deferred',task_id=tid)
             ready=retry+ready
+            if continue_on_error:
+                skipped_now=failure_policy.skip_stalled_items(store,graph,states,allowed,complete,ready)
+                if skipped_now:
+                    refreshed=set()
+                    for key in skipped_now: report('item_skipped',item_id=key[1])
+                    continue
             if not ready:
                 if unknown:
                     report('stop',reason='transport_unknown')
-                    return {'executed':completed,'stop':'transport_unknown','tasks':unknown}
+                    return {'executed':completed[0],'stop':'transport_unknown','tasks':unknown}
+                if allowed is not None:
+                    report('stop',reason='incomplete_batch')
+                    return {'executed':completed[0],'stop':'incomplete_batch','batch':overall['items']['batch']}
                 break
             started_ids={e['task_id'] for e in events if e['kind']=='started'}
             started_items={item_key(task) for tid,task in graph.tasks.items() if tid in started_ids}
-            current_item=min({item_key(task) for task in ready},key=lambda key:(key not in started_items,item_order[key]))
-            overall['items']['current']=current_item[1]
-            overall['items']['position']=item_order[current_item]+1
-            item_ready=[task for task in ready if item_key(task)==current_item]
-            batch=item_ready[:max_calls-issued] if max_calls is not None else item_ready
-            report('batch',total=len(batch))
-            for batch_index,task in enumerate(batch):
-                p=profile(store.config,task.profile_id)
-                if backend_override=='mock' and p.provider!='mock': raise ValueError('不能用 mock 替换冻结的真实后端')
-                if p.provider!='mock' and not (allow_network and store.config['network_enabled']): raise BudgetError('真实调用需要冻结网络开关及 --allow-network')
-                check_credential(p)
-                if states[task.task_id]=='transport_unknown':
-                    count=chargeable_attempts(store,task.task_id,preflight_failures)
-                    delay=min(30,5*2**max(0,count-1))
-                    report('retry_wait',seconds=delay,stage=task.stage,item_id=task.context.get('item_id',''),agent=task.context.get('agent',''))
-                    time.sleep(delay)
-                    attempt_id=f'{task.task_id}-a{len(store.attempts(task.task_id))+1:03d}'
-                    store.event('retry_requested',task_id=task.task_id,attempt_id=attempt_id,reason='传输异常自动退避重试')
-                    transition(overall,task.stage,'transport_unknown','ready')
-                reserved=Budget(store).reserve(task,p)
-                starts=store.attempts(task.task_id)
-                if chargeable_attempts(store,task.task_id,preflight_failures)>=store.config['max_attempts']: raise BudgetError('该槽位已达到尝试上限')
-                aid=f'{task.task_id}-a{len(starts)+1:03d}'
-                store.event('started',task_id=task.task_id,attempt_id=aid,stage=task.stage,provider=p.provider,reserved_tokens=reserved,wire_format=p.provider)
-                issued+=1
-                transition(overall,task.stage,'ready','running')
-                report('start',index=batch_index,total=len(batch),stage=task.stage,item_id=task.context.get('item_id',''),agent=task.context.get('agent',''))
-                def commit_received(raw,http_status,headers):
-                    store.put('attempts',aid+'.receipt',{'status':http_status,'headers':headers})
-                    store.write_blob('raw',aid,raw,'.bin')
-                try: result=backend_for(store,task,on_raw=commit_received).generate(task,p)
-                except (TransportUnknown,TimeoutError,OSError):
-                    store.event('transport_unknown',task_id=task.task_id,attempt_id=aid)
-                    transition(overall,task.stage,'running','transport_unknown')
-                    consecutive_failures+=1
-                    if auto_retry_unknown and consecutive_failures<6:
-                        break
-                    report('stop',reason='transport_unknown',task_id=task.task_id)
-                    return {'executed':completed,'stop':'transport_unknown','task_id':task.task_id}
-                except ValueError:
-                    # 调用前凭据/配置失败亦保守记为未决，不打印可能携带请求信息的异常正文。
-                    store.event('transport_unknown',task_id=task.task_id,attempt_id=aid,reason='backend rejected configuration')
-                    transition(overall,task.stage,'running','transport_unknown')
-                    raise ValueError('后端配置或凭据检查失败；状态已记录，请检查配置') from None
-                parsed=record_result(store,task,result,aid); completed+=1
-                consecutive_failures=0
-                transition(overall,task.stage,'running','succeeded' if parsed['valid'] else 'invalid')
-                report('finish',index=batch_index+1,total=len(batch),stage=task.stage,item_id=task.context.get('item_id',''),agent=task.context.get('agent',''),state='succeeded' if parsed['valid'] else 'invalid')
-                if result.error:
-                    report('stop',reason='backend_error',task_id=task.task_id)
-                    return {'executed':completed,'stop':'backend_error','task_id':task.task_id,'reason':result.error}
-    reason='call_limit' if max_calls is not None and issued>=max_calls else 'no_ready_tasks'
+            # 按题去重后再截断；不去重会把同一道题塞进多个 worker，破坏「一 worker 一题」。
+            ranked=sorted({item_key(task) for task in ready},key=lambda key:(key not in started_items,item_order[key]))
+            position={item_key(task):index for index,task in enumerate(ready)}
+            room=max_calls-issued[0] if max_calls is not None else None
+            plans=[]
+            for key in ranked[:concurrency]:
+                tasks=sorted((t for t in ready if item_key(t)==key),key=lambda t:position[item_key(t)])
+                take=tasks if room is None else tasks[:max(0,room)]
+                if room is not None: room-=len(take)
+                if take: plans.append((key,take))
+            if not plans: break
+            if pipeline:
+                # 启动时只读恢复全部题目的视图；只为本批至多 N 道题落盘下一步。
+                # 否则迁移已有 500 题材料时，会在首次调用前为全部题目写入 T1。
+                graph.persist=True
+                for key,_ in plans: graph.refresh_item(key)
+            refreshed={key for key,_ in plans}
+            overall['items']['position']=item_order[plans[0][0]]+1
+            overall['items']['current']=plans[0][0][1]
+            overall['items']['active']=[key[1] for key,_ in plans]
+            overall['items']['active_positions']=[item_order[key]+1 for key,_ in plans]
+            report('batch',total=sum(len(tasks) for _,tasks in plans))
+            for outcome in run_plans(plans,states,preflight_failures):
+                if outcome and stop_reason is None: stop_reason=outcome
+            if stop_reason:
+                # 在飞题已经跑完并落盘，停止原因现在才安全上报。
+                reason,task_id,detail=stop_reason
+                report('stop',reason=reason,task_id=task_id)
+                return {'executed':completed[0],'stop':reason,'task_id':task_id,**({'reason':detail} if detail else {})}
+    reason='call_limit' if max_calls is not None and issued[0]>=max_calls else 'no_ready_tasks'
     report('stop',reason=reason)
-    return {'executed':completed,'stop':reason}
+    return {'executed':completed[0],'stop':reason}
 
 def status(store):
     store._event_cache=None
@@ -248,9 +450,14 @@ def status(store):
     states=Counter(task_states.values())
     budget=Budget(store).totals()
     revision=next((e['sequence'] for e in reversed(events) if e['kind']=='revision'),0)
+    progress=progress_snapshot(store,graph,task_states)
+    from .failures import skipped_items
+    skipped=skipped_items(store)
+    retired=({'invalid':progress['invalid'],'superseded_material_invalid':states.get('invalid',0)-progress['invalid']}
+             if store.config.get('complete_matrix') else {})
     return {'run_id':store.path.name,'active_tasks':len(graph.tasks),'recorded_tasks':len(store.ids('tasks')),
-        'progress':progress_snapshot(store,graph,task_states),
-        **{k:states.get(k,0) for k in ('ready','succeeded','invalid','transport_unknown')},'blocked_groups':graph.blocked,
+        'progress':progress,'actionable_ready':sum(state=='ready' and (graph.tasks[tid].context['dataset_id'],graph.tasks[tid].context['item_id']) not in skipped for tid,state in task_states.items()),
+        **{k:states.get(k,0) for k in ('ready','succeeded','invalid','transport_unknown')},**retired,'blocked_groups':graph.blocked,
         'materials':dict(Counter(m['status'] for m in graph.materials)),'comparisons':len(graph.comparisons),'budget':budget,
         'inherited_calls':sum(e['kind']=='started' and e['sequence']<revision for e in events),
         'new_calls':sum(e['kind']=='started' and e['sequence']>revision for e in events),

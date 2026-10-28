@@ -1,0 +1,10 @@
+{
+  "slots": [
+    {"id": "averitec-minimax-primary", "enabled": true, "config": "averitec-rq1-minimax-v10-main.json", "pending": ""},
+    {"id": "averitec-model-2", "enabled": false, "config": null, "pending": "锁定第二个真实模型快照及其参数后填写配置"},
+    {"id": "averitec-model-3", "enabled": false, "config": null, "pending": "锁定第三个真实模型快照及其参数后填写配置"},
+    {"id": "dataset-2-minimax", "enabled": false, "config": null, "pending": "研究者核定第二个证据数据集、原生标签和证据包后填写配置"},
+    {"id": "dataset-2-model-2", "enabled": false, "config": null, "pending": "第二数据集及第二模型待定"},
+    {"id": "dataset-2-model-3", "enabled": false, "config": null, "pending": "第二数据集及第三模型待定"}
+  ]
+}

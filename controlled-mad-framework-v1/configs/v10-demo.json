@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "adapter": "jsonl",
+    "source": "../examples/toy_dataset.jsonl"
+  },
+  "profiles": {
+    "mock": {
+      "provider": "mock",
+      "model": "mock-v1",
+      "max_tokens": 2048
+    }
+  },
+  "debate_models": [
+    "mock"
+  ],
+  "material_model": "mock",
+  "material_audit": true,
+  "s0_batch": "s0-001",
+  "selection_seed": 42,
+  "repeats": 2,
+  "history_policy": "full",
+  "message_order": [
+    "agent_1",
+    "agent_2",
+    "agent_3"
+  ],
+  "operations": [
+    "ethos",
+    "logos",
+    "pathos",
+    "conclusion_front",
+    "conclusion_back",
+    "support_first",
+    "limitation_first"
+  ],
+  "interventions": [
+    {
+      "rule_id": "S_to_A_T2",
+      "source_agent": "S",
+      "target_agent": "A",
+      "delivery_round": 2
+    },
+    {
+      "rule_id": "A_to_B_T3",
+      "source_agent": "A",
+      "target_agent": "B",
+      "delivery_round": 3
+    }
+  ],
+  "diagnostics": {
+    "oo": {
+      "enabled": true,
+      "repeats": 1
+    }
+  },
+  "max_generation_attempts": 1,
+  "max_attempts": 3,
+  "budget": {
+    "max_calls": 10000,
+    "max_tokens": 100000000,
+    "stage_calls": {
+      "S0": 5000,
+      "generate": 5000,
+      "annotate": 5000,
+      "audit": 5000,
+      "T1": 5000,
+      "T2": 5000,
+      "T3": 5000
+    }
+  },
+  "network_enabled": false,
+  "mock_scenario": "../examples/mock_scenario.json",
+  "material_policy": "strict_v10",
+  "material_gate": true,
+  "audit_model": "mock",
+  "coding": {
+    "size": 2,
+    "seed": 20261022
+  },
+  "inference": {
+    "resamples": 199,
+    "seed": 20261022,
+    "alpha": 0.05
+  },
+  "intervention_subset": {
+    "size": 2,
+    "seed": 20261022
+  }
+}

@@ -1,44 +1,34 @@
 # DebateFork
 
-**A controlled, paired-fork evaluation framework for studying how expression cues
-interact with peer deliberation in multi-agent debate.**
+A controlled, paired-fork framework for studying how expression cues affect collective judgments and how continued peer interaction changes those effects.
 
-**Status:** The mock workflow runs end to end and is covered by automated tests.
-Research runs need a separately frozen model, sample, and budget; mock outputs
-are not empirical findings.
+## Current RQ1 protocol
 
----
+Three same-model agents independently answer S0. Freeze the initial state and one seeded sender, prepare original O plus seven expression variants, then share T1 between the I and M arms. Both continue to T3: I receives no new peer messages after T1; M receives the previous round's peer replies. Each item has 8 materials × 2 terminal arms = 16 cells.
 
-## Why this framework
+`D = (M_R − M_O) − (I_R − I_O)`
 
-A standard "rewrite the input, rerun MAD, compare accuracy" experiment cannot
-answer the question we care about:
+D is calculated per label at the vote and verdict levels. Accuracy and judgment transitions are additional outcomes. Multiple variants share the same O trajectory; the item remains the sampling unit.
 
-> When an expression change moves the final verdict, how much of that change
-> comes from the first direct reading, and how much only appears after peer
-> interaction? Which conclusions depend on missing data, no-majority outcomes,
-> or a changed message source?
+## Start here / 使用说明
 
-DebateFork is a measurement protocol that freezes a shared initial state,
-branches paired conditions, and records every visible message and round result.
+- [Framework README and full500 command](controlled-mad-framework-v1/README.md)
+- [Experiment design and interpretation](controlled-mad-framework-v1/guide/experiment-design.md)
+- [Running, ten-item batches, concurrency and resume](controlled-mad-framework-v1/guide/running-experiments.md)
+- [Local open-weight inference services and hosted API providers](controlled-mad-framework-v1/guide/model-backends.md)
+- [Current versus historical configurations](controlled-mad-framework-v1/configs/README.md)
+- [Development and verification](controlled-mad-framework-v1/guide/development.md)
+- [Data provenance, licensing and checksums](controlled-mad-framework-v1/datasets/README.md)
+- [Changes](controlled-mad-framework-v1/CHANGELOG.md)
 
-## Core estimator
+Python 3.11+, standard-library runtime, Windows/Linux/macOS. HTTP adapters support OpenAI-compatible Chat Completions and Anthropic-compatible Messages. Local models must be served separately; the framework does not load weights. Local loopback HTTP is supported; external endpoints use HTTPS. Templates require actual model capabilities and credentials before use.
 
-The three-round protocol compares the expression effect with and without peer
-interaction on the same item and initial state:
+## Verification and study status
 
-`D = (M_R - M_O) - (I_R - I_O)`
+As of 2026-10-28, the real MiniMax-M3.1-Flash three-item equal-rounds pilot completed 48/48 cells and 21/21 eligible rewrites. These three items all had unanimous S0 judgments and unchanged terminal labels across conditions; the pilot validates the workflow, not a population effect. New full500 equal-rounds configurations are provided; this does not claim that a new full500 run has finished.
 
-The separate five-round RQ2 supplement tracks `M_R - M_O` from T1 to T5 on a
-preselected subset. T5 is the final verdict. The supplement does not report a
-five-round four-cell `D`.
+The earlier completed 500-item run used I-T1/M-T3 and remains a separate exploratory protocol. It is not relabeled as an equal-rounds study. RQ2 is a separate five-round MAD supplement on a frozen subset, with T5 final and no I/M four-cell D.
 
-## Repository
+167 automated tests pass, including concurrency/resume equivalence and local HTTP contracts. Mock outputs validate engineering behavior only. Research runs need separately frozen model identities, samples, parameters and budgets.
 
-- [Framework, commands, and Windows instructions](controlled-mad-framework-v1/README.md)
-- [Dataset files, provenance, licenses, and checksums](controlled-mad-framework-v1/datasets/README.md)
-- [AVeriTeC and mock configurations](controlled-mad-framework-v1/configs)
-
-AVeriTeC dev is integrated with the framework. WiCE files are included as
-research inputs but do not yet have a runnable adapter in this package.
-Configuration files contain environment-variable names, not API keys.
+This repository contains source, templates, synthetic examples and previously published research input datasets with their original license notices. API keys, model weights, private research notes and raw experiment outputs are excluded.

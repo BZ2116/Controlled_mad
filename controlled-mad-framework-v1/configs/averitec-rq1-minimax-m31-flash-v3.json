@@ -26,6 +26,7 @@
   ],
   "material_model": "minimax_m31_flash",
   "audit_model": "minimax_m31_flash",
+  "material_audit": false,
   "s0_batch": "s0-001",
   "selection_seed": 42,
   "repeats": 1,

@@ -1,13 +1,13 @@
 import json, os
 from typing import Protocol
 from ..domain import Task, ModelProfile, ModelResult
-from .transport import http_post
+from .transport import http_post, RetryableHTTP, retryable_status
 class Backend(Protocol):
     def generate(self,task:Task,profile:ModelProfile)->ModelResult: ...
 
 class HTTPBackend:
-    def __init__(self,transport=http_post,on_raw=None):
-        self.transport=transport; self.on_raw=on_raw
+    def __init__(self,transport=http_post,on_raw=None,retry_http=False):
+        self.transport=transport; self.on_raw=on_raw; self.retry_http=retry_http
     def generate(self,task,profile):
         key=os.environ.get(profile.credential_env)
         if not key: raise ValueError(f'凭据环境变量未设置：{profile.credential_env}')
@@ -21,6 +21,10 @@ class HTTPBackend:
         response_headers=response_headers or {}
         if status!=200:
             retry=response_headers.get('Retry-After',response_headers.get('retry-after',''))
+            # 默认把 HTTP 层失败当作 stop 的信号：服务出问题时静默重试会掩盖真问题，
+            # 还可能把限流伪装成材料质量不合格。只有显式开启 --retry-http 才交给退避重试。
+            if self.retry_http and retryable_status(status):
+                raise RetryableHTTP(f'HTTP {status}; Retry-After={retry}')
             return ModelResult(raw,'',None,None,None,f'HTTP {status}; Retry-After={retry}')
         return self.decode(raw,profile)
     def decode(self,raw,profile):

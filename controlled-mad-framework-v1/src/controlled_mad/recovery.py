@@ -7,6 +7,9 @@ from .store import IntegrityError
 
 def verify_run(store):
     report=store.verify()
+    # 显式审计必须以原始事件为准，不能让断点缓存代替日志核验。
+    store._event_cache=None
+    store._ensure_events(use_checkpoint=False)
     tasks={t['task_id']:t for t in store.all('tasks')}
     parses={key:store.get('parses',key) for key in store.ids('parses')}
     for key,task in tasks.items():

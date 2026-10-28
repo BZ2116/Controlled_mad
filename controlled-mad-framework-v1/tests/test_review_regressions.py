@@ -60,7 +60,7 @@ class ReviewRegressions(unittest.TestCase):
         def transport(*args):
             calls.append(1)
             return 200,{},canonical_bytes({'model':'m','choices':[{'message':{'content':'{"label":"A","comment":"recovered"}'},'finish_reason':'stop'}]})
-        def factory(store,task,on_raw=None): return OpenAIBackend(transport,on_raw)
+        def factory(store,task,on_raw=None,**kwargs): return OpenAIBackend(transport,on_raw)
         with patch.dict('os.environ',{'TEST_KEY':'dummy'}), patch('controlled_mad.engine.backend_for',side_effect=factory):
             with patch.object(OpenAIBackend,'decode',side_effect=RuntimeError('解码中断')):
                 with self.assertRaises(RuntimeError): execute_ready(s,allow_network=True,max_calls=1)

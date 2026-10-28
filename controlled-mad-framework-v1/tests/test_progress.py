@@ -72,3 +72,16 @@ class Progress(unittest.TestCase):
         self.assertEqual(text.count('\r'),2)
         self.assertNotIn('\033',text)
         self.assertEqual(text.count('\n'),1)
+
+    def test_question_number_is_visible_in_narrow_terminal(self):
+        output=io.StringIO()
+        with contextlib.redirect_stderr(output):
+            reporter=ProgressReporter(); reporter.tty=True
+            p=status(self.store)['progress']
+            p['items'].update(total=500,current='averitec_0016',position=17,
+                              active=['averitec_0016','averitec_0017','averitec_0018'],active_positions=[17,18,19])
+            with patch('controlled_mad.cli.shutil.get_terminal_size',return_value=__import__('os').terminal_size((80,24))):
+                reporter({'event':'start','overall':p,'completed':0,'stage':'T1',
+                          'item_id':'averitec_0016','item_position':17,'agent':'agent_1'})
+            reporter.close()
+        self.assertIn('第17/500题',output.getvalue())
