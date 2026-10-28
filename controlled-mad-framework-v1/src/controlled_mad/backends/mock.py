@@ -14,8 +14,11 @@ class MockBackend:
             index=int(ctx.get('agent','agent_1').split('_')[-1])-1
             if task.stage=='S0': value={'label':item['s0'][index],'comment':item['comment']}
             elif task.stage=='generate':
-                prefix={'ethos':'A careful assessment: ','logos':'The reasoning is: ','pathos':'Please consider: '}[ctx['operation']]
-                value={'label':ctx['label'],'comment':prefix+ctx['original']}
+                if ctx['operation']=='neutral':
+                    value={'label':ctx['label'],'comment':ctx['original'].replace('Support A: ','Support A: Restated, ',1)}
+                else:
+                    prefix={'ethos':'A careful assessment: ','logos':'The reasoning is: ','pathos':'Please consider: '}[ctx['operation']]
+                    value={'label':ctx['label'],'comment':prefix+ctx['original']}
             elif task.stage=='annotate': value={'blocks':item['blocks']}
             elif task.stage=='audit': value={'verdict':item.get('audits',{}).get(ctx['operation'],'pass'),'reason':'Fixture-defined audit result; synthetic only.'}
             else:

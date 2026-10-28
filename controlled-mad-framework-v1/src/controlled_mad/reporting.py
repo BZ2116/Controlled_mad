@@ -48,6 +48,9 @@ def export_analysis(bundle,store):
         for row in primary:
             text+=f"| {row['dataset_id']}/{row['model_id']} | {row.get('design','legacy_three_round')} | {row['operation']} | {row['independent_units']} | {row['p_value']} | {row.get('holm_p_value')} |\n"
         text+='\n区间为逐类别点态区间，非同时区间；推断条件于冻结 S0 和材料，小分母及退化情况见 inference 导出。\n'
+    if bundle.get('study_protocol')=='continued_peer_exchange_v2':
+        from .study_reporting import render
+        text=render(bundle)
     store.write_blob('reports',f'report-{aid[:16]}',text.encode('utf-8'),'.md')
     store.put('reports',f'analysis-{aid[:16]}',bundle)
     return {'analysis_id':aid,'report':str(store.path/'reports'/f'report-{aid[:16]}.md'),'exports':paths}

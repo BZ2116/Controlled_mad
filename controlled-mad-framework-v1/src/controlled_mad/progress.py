@@ -20,11 +20,12 @@ def progress_snapshot(store,graph,states):
     """等待项包含尚未生成或被无效上游阻断的槽位，不伪装成已取消。"""
     config=store.config
     stages_order=stages_for(config)
-    rhetoric=sum(op in ('ethos','logos','pathos') for op in config['operations'])
+    rhetoric=sum(op in ('ethos','logos','pathos','neutral') for op in config['operations'])
     reorder=len(config['operations'])-rhetoric
     attempts=config['max_generation_attempts']
     audit_enabled=config.get('material_audit',True)
-    per=Counter(S0=3,generate=rhetoric*attempts,annotate=int(bool(reorder) and not config.get('complete_matrix')),audit=(rhetoric*attempts+reorder) if audit_enabled else 0)
+    from .protocol import STUDY_V2
+    per=Counter(S0=3,generate=rhetoric*attempts,annotate=int(bool(reorder) and not config.get('complete_matrix') and config.get('study_protocol')!=STUDY_V2),audit=(rhetoric*attempts+reorder) if audit_enabled else 0)
     oo=config['diagnostics']['oo']
     if oo['enabled']:
         for stage,count in (('T1',3),('T2',6),('T3',6)):

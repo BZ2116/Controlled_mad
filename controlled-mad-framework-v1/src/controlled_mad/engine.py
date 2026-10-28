@@ -37,10 +37,13 @@ def create_run(config_path,run_id,root=None):
     overrides=c.get('prompts',{})
     if set(overrides)-set(names): raise ValueError('未知提示名称')
     templates={name:(Path(config_path).resolve().parent/overrides[name]).read_text(encoding='utf-8-sig') if name in overrides else files('controlled_mad').joinpath('resources',f'{name}.v1.txt').read_text(encoding='utf-8') for name in names}
-    if c.get('complete_matrix'):
+    from .protocol import STUDY_V2
+    if c.get('complete_matrix') or c.get('study_protocol')==STUDY_V2:
         for name in ('s0','rhetoric'):
             if name not in overrides:
                 templates[name]=files('controlled_mad').joinpath('resources',f'{name}.matrix-v1.txt').read_text(encoding='utf-8')
+    if c.get('study_protocol')==STUDY_V2 and c['operations']==['neutral'] and 'rhetoric' not in overrides:
+        templates['rhetoric']=files('controlled_mad').joinpath('resources','rhetoric.neutral-v2.txt').read_text(encoding='utf-8')
     if c.get('experiment')=='rq2_five_round' and 'debate' not in overrides:
         templates['debate']=files('controlled_mad').joinpath('resources','debate.rq2-five-round.txt').read_text(encoding='utf-8')
     scenario=json.loads(Path(c['mock_scenario']).read_text(encoding='utf-8-sig')) if c.get('mock_scenario') else {'items':{}}
@@ -58,12 +61,19 @@ def create_run(config_path,run_id,root=None):
         if c.get('material_policy')=='strict_v10':
             from .visibility import visibility_matrix
             store.put('inputs','visibility-plan',{'matrix':visibility_matrix(c)})
-        for name,setting in (('coding-plan','coding'),('intervention-subset','intervention_subset')):
+        for name,setting in (('coding-plan','coding'),('intervention-subset','intervention_subset'),('material-validation-plan','material_validation')):
             if c.get(setting):
                 _,record=select_bundle(bundle,c[setting])
                 if setting=='coding':
                     from .coding import CODEBOOK
-                    record['codebook']=CODEBOOK
+                    from .coding import CODEBOOK_V2
+                    record['codebook']=CODEBOOK_V2 if c.get('study_protocol')==STUDY_V2 else CODEBOOK
+                    if c.get('study_protocol')==STUDY_V2 and c['coding'].get('replies_per_item') is not None:
+                        from .coding import planned_reply_units
+                        record['planned_reply_units']=sorted(planned_reply_units(c,plain(bundle.items),set(record['selected_item_ids'])))
+                if setting=='material_validation':
+                    from .material_validation import CODEBOOK as MATERIAL_CODEBOOK
+                    record['codebook']=MATERIAL_CODEBOOK
                 store.put('inputs',name,record)
         store.write_blob('inputs','items',b''.join(canonical_bytes(i)+b'\n' for i in bundle.items),'.jsonl')
         store.write_blob('analysis_inputs','gold',b''.join(canonical_bytes(g)+b'\n' for g in bundle.gold),'.jsonl')
@@ -311,6 +321,11 @@ def execute_ready(store,allow_network=False,max_calls=None,backend_override=None
             '读取断点索引' if u.get('source')=='checkpoint' else '首次建立断点索引：仅回放历史事件')+
             f" {u['loaded']}/{u['total']} 条"))
         store.save_checkpoint()
+        if question_batch_size is None:
+            previous=next((e.get('question_batch_size') for e in reversed(store.all('events'))
+                           if e['kind']=='execution_policy' and e.get('question_batch_size')),None)
+            from .protocol import STUDY_V2
+            question_batch_size=previous or (10 if store.config.get('complete_matrix') and store.config.get('study_protocol')==STUDY_V2 else None)
         from .pipeline import enable_item_pipeline, item_pipeline_enabled
         if item_pipeline or store.config.get('complete_matrix'): enable_item_pipeline(store)
         pipeline=item_pipeline_enabled(store)

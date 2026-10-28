@@ -2,13 +2,18 @@
 
 A controlled, paired-fork framework for studying how expression cues affect collective judgments and how continued peer interaction changes those effects.
 
-## Current RQ1 protocol
+## Current RQ1 protocol: continued peer exchange v2
 
 Three same-model agents independently answer S0. Freeze the initial state and one seeded sender, prepare original O plus seven expression variants, then share T1 between the I and M arms. Both continue to T3: I receives no new peer messages after T1; M receives the previous round's peer replies. Each item has 8 materials × 2 terminal arms = 16 cells.
 
 `D = (M_R − M_O) − (I_R − I_O)`
 
 D is calculated per label at the vote and verdict levels. Accuracy and judgment transitions are additional outcomes. Multiple variants share the same O trajectory; the item remains the sampling unit.
+
+Study v2 adds preselected human manipulation checks (50 items / up to350 material pairs), pre-output stratified reply coding (up to600 units), 1999 item-bootstrap resamples / seed20261022, conservative handling of degenerate inference, explicit missing denominators, and separate neutral/O-O and directed-message controls. It does not assume MAD must improve accuracy or amplify expression effects. Real v2 runs and human annotation must still be performed; automated acceptance is not a semantic-equivalence proof.
+
+- [Study protocol v2](controlled-mad-framework-v1/guide/study-protocol-v2.md)
+- [Human validation, reply coding and paper-wide inference](controlled-mad-framework-v1/guide/human-validation.md)
 
 ## Start here / 使用说明
 
@@ -29,6 +34,6 @@ As of 2026-10-28, the real MiniMax-M3.1-Flash three-item equal-rounds pilot comp
 
 The earlier completed 500-item run used I-T1/M-T3 and remains a separate exploratory protocol. It is not relabeled as an equal-rounds study. RQ2 is a separate five-round MAD supplement on a frozen subset, with T5 final and no I/M four-cell D.
 
-167 automated tests pass, including concurrency/resume equivalence and local HTTP contracts. Mock outputs validate engineering behavior only. Research runs need separately frozen model identities, samples, parameters and budgets.
+181 automated tests pass, including concurrency/resume equivalence and local HTTP contracts. Mock outputs validate engineering behavior only. Research runs need separately frozen model identities, samples, parameters and budgets.
 
 This repository contains source, templates, synthetic examples and previously published research input datasets with their original license notices. API keys, model weights, private research notes and raw experiment outputs are excluded.

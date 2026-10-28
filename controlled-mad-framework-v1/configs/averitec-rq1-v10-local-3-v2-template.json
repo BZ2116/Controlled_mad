@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "adapter": "averitec",
+    "source": "../datasets/averitec/dev.json"
+  },
+  "profiles": {
+    "candidate": {
+      "provider": "openai",
+      "model": "REPLACE_SERVED_MODEL_ID",
+      "expected_model": "REPLACE_SERVED_MODEL_ID",
+      "base_url": "http://127.0.0.1:8000/v1",
+      "credential_env": "LOCAL_MODEL_API_KEY",
+      "temperature": 0.0,
+      "max_tokens": 16384,
+      "max_tokens_field": "max_tokens",
+      "reasoning_effort": null,
+      "seed": null,
+      "supports_seed": false,
+      "context_limit": 128000,
+      "timeout": 300
+    }
+  },
+  "debate_models": [
+    "candidate"
+  ],
+  "material_model": "candidate",
+  "audit_model": "candidate",
+  "material_audit": true,
+  "s0_batch": "s0-continued-peer-v2",
+  "selection_seed": 42,
+  "repeats": 1,
+  "history_policy": "full",
+  "message_order": [
+    "agent_1",
+    "agent_2",
+    "agent_3"
+  ],
+  "operations": [
+    "ethos",
+    "logos",
+    "pathos",
+    "conclusion_front",
+    "conclusion_back",
+    "support_first",
+    "limitation_first"
+  ],
+  "interventions": [],
+  "diagnostics": {
+    "oo": {
+      "enabled": false,
+      "repeats": 1
+    }
+  },
+  "max_generation_attempts": 3,
+  "max_attempts": 3,
+  "budget": {
+    "max_calls": 600,
+    "max_tokens": 200000000,
+    "stage_calls": {
+      "S0": 30,
+      "generate": 36,
+      "annotate": 0,
+      "audit": 54,
+      "T1": 100,
+      "T2": 200,
+      "T3": 200
+    }
+  },
+  "network_enabled": false,
+  "mock_scenario": null,
+  "material_policy": "strict_v10",
+  "material_gate": true,
+  "complete_matrix": true,
+  "matrix_layout": "group_first_v2",
+  "matrix_protocol": "equal_rounds_v10",
+  "subset": {
+    "item_ids": [
+      "averitec_0000",
+      "averitec_0001",
+      "averitec_0002"
+    ]
+  },
+  "study_protocol": "continued_peer_exchange_v2",
+  "coding": {
+    "size": 3,
+    "seed": 20261022,
+    "replies_per_item": 12
+  },
+  "material_validation": {
+    "size": 3,
+    "seed": 20261022
+  },
+  "inference": {
+    "resamples": 1999,
+    "seed": 20261022,
+    "alpha": 0.05
+  }
+}

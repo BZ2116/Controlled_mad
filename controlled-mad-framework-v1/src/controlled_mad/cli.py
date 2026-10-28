@@ -148,7 +148,7 @@ def parser():
     q.add_argument('--config',required=True); q.add_argument('--run-id',required=True); q.add_argument('--runs-root')
     q.add_argument('--allow-network',action='store_true'); q.add_argument('--max-calls',type=int); q.add_argument('--backend',choices=('mock','native'))
     add_execution_flags(q)
-    for name in ('advance','export-tasks','import-responses','run','status','matrix-status','failure-status','resume','reparse','retry','fork-revision','analyze','trace','verify','freeze-materials','coding-export','coding-import','coding-status'):
+    for name in ('advance','export-tasks','import-responses','run','status','matrix-status','failure-status','resume','reparse','retry','fork-revision','analyze','trace','verify','freeze-materials','coding-export','coding-import','coding-status','material-validation-export','material-validation-import','material-validation-status'):
         q=sub.add_parser(name)
         q.add_argument('--run-id',required=True); q.add_argument('--runs-root')
         if name in ('run','resume'):
@@ -156,7 +156,7 @@ def parser():
             add_execution_flags(q)
         if name=='export-tasks': q.add_argument('--stage',choices=('S0','generate','annotate','audit','T1','T2','T3','T4','T5'))
         if name=='import-responses': q.add_argument('--source',required=True)
-        if name=='coding-import': q.add_argument('--source',required=True)
+        if name in ('coding-import','material-validation-import'): q.add_argument('--source',required=True)
         if name in ('reparse','retry','fork-revision'): q.add_argument('--task-id',required=True)
         if name=='reparse': q.add_argument('--parser-version',required=True,choices=('vote-v1','vote-v2'))
         if name=='retry': q.add_argument('--reason',required=True)
@@ -205,6 +205,9 @@ def dispatch(a):
     if a.command=='coding-export': return api.export_coding(store)
     if a.command=='coding-import': return api.import_coding(store,a.source)
     if a.command=='coding-status': return api.coding_status(store)
+    if a.command=='material-validation-export': return api.export_material_validation(store)
+    if a.command=='material-validation-import': return api.import_material_validation(store,a.source)
+    if a.command=='material-validation-status': return api.material_validation_status(store)
     if a.command=='advance': return {'active_tasks':len(api.advance(store))}
     if a.command=='export-tasks': return api.export_tasks(store,a.stage)
     if a.command in ('run','resume'):

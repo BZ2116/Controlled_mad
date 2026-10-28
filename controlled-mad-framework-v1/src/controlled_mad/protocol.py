@@ -8,6 +8,7 @@ AMENDMENT = 'single-pass-amendment'
 LEGACY = 'legacy_three_round'
 SINGLE_PASS = 'single_pass_v1'
 EQUAL_ROUNDS = 'equal_rounds_v10'
+STUDY_V2 = 'continued_peer_exchange_v2'
 
 
 def load_amendment(store):

@@ -1,5 +1,7 @@
 # 运行、查看与断点续跑
 
+当前推荐v2配置，完整规范见[study-protocol-v2](study-protocol-v2.md)。先对新服务试跑材料做人工核查；完成16格本身不等于操纵验证通过。导出、导入和论文级汇总见[人工验证说明](human-validation.md)。
+
 所有命令从框架目录执行。可先 `python -m pip install -e .`，或直接设置 `$env:PYTHONPATH = 'src'`。Linux/macOS 用 `export PYTHONPATH=src`，命令内容相同，续行符改为 shell 对应写法。
 
 ## 完整实验前
@@ -9,8 +11,8 @@
 3. 使用新的 run-id。完整实验建议每批 10 题、按题并发 3；题内调用串行。实验配置不随暂停与续跑变化。
 
 ```powershell
-python -X utf8 -m controlled_mad validate --config configs/averitec-rq1-minimax-equal-rounds-500.json
-python -X utf8 -m controlled_mad plan --config configs/averitec-rq1-minimax-equal-rounds-500.json
+python -X utf8 -m controlled_mad validate --config configs/averitec-rq1-minimax-equal-rounds-500-v2.json
+python -X utf8 -m controlled_mad plan --config configs/averitec-rq1-minimax-equal-rounds-500-v2.json
 ```
 
 MiniMax 凭据环境变量为 MINIMAX_API_KEY；默认不自动读文件。需要文件时在 main-run 命令显式加 `--credentials-file <本机路径>`。密钥文件不上传 GitHub。
@@ -19,8 +21,8 @@ MiniMax 凭据环境变量为 MINIMAX_API_KEY；默认不自动读文件。需�
 
 ```powershell
 python -X utf8 -u -m controlled_mad main-run `
-  --config configs/averitec-rq1-minimax-equal-rounds-500.json `
-  --run-id minimax-equal-rounds-500-v1 `
+  --config configs/averitec-rq1-minimax-equal-rounds-500-v2.json `
+  --run-id minimax-continued-peer-500-v2 `
   --runs-root ../runs `
   --question-batch-size 10 `
   --concurrency 3 `
@@ -44,9 +46,9 @@ main-run 自动启用有限的 HTTP/传输退避重试，支持 Retry-After。�
 ## 进度与验收
 
 ```powershell
-python -X utf8 -m controlled_mad status --run-id minimax-equal-rounds-500-v1 --runs-root ../runs
-python -X utf8 -m controlled_mad matrix-status --run-id minimax-equal-rounds-500-v1 --runs-root ../runs
-python -X utf8 -m controlled_mad failure-status --run-id minimax-equal-rounds-500-v1 --runs-root ../runs
+python -X utf8 -m controlled_mad status --run-id minimax-continued-peer-500-v2 --runs-root ../runs
+python -X utf8 -m controlled_mad matrix-status --run-id minimax-continued-peer-500-v2 --runs-root ../runs
+python -X utf8 -m controlled_mad failure-status --run-id minimax-continued-peer-500-v2 --runs-root ../runs
 ```
 
 matrix-status 是只读逐格检查，完整输出较长。最终要求：500/500 题完整；8,000/8,000 格均 complete；每题八种材料齐全，I-T3/M-T3 各有真实三票。no_majority 是有效无多数，不等于运行失败。
@@ -56,7 +58,7 @@ matrix-status 是只读逐格检查，完整输出较长。最终要求：500/50
 完整审计可单独执行，耗时比普通续跑大：
 
 ```powershell
-python -X utf8 -m controlled_mad verify --run-id minimax-equal-rounds-500-v1 --runs-root ../runs
+python -X utf8 -m controlled_mad verify --run-id minimax-continued-peer-500-v2 --runs-root ../runs
 ```
 
 ## 报告与导出
@@ -64,8 +66,8 @@ python -X utf8 -m controlled_mad verify --run-id minimax-equal-rounds-500-v1 --r
 main-run 完成时自动生成 reports 与 exports。只重算离线分析：
 
 ```powershell
-python -X utf8 -m controlled_mad analyze --run-id minimax-equal-rounds-500-v1 --runs-root ../runs
-python -X utf8 -m controlled_mad trace --run-id minimax-equal-rounds-500-v1 --runs-root ../runs --item-id averitec_0000
+python -X utf8 -m controlled_mad analyze --run-id minimax-continued-peer-500-v2 --runs-root ../runs
+python -X utf8 -m controlled_mad trace --run-id minimax-continued-peer-500-v2 --runs-root ../runs --item-id averitec_0000
 ```
 
 报告按内容标识区分版本；旧版本留存。核对结果时使用同一 analysis_id 的 result_matrix、condition_summaries、item_effects 等导出，不混用早期未齐版本。新全量配置的 inference 在离线分析阶段计算，不请求模型。不要为给旧 run 增加统计而手改其 manifest；独立离线再分析应另记设置与来源。

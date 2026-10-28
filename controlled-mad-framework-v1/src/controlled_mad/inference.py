@@ -25,12 +25,15 @@ def percentile(values, probability):
     return values[lo] + (values[hi] - values[lo]) * (position - lo)
 
 
-def infer_effects(effects, settings):
+def infer_effects(effects, settings, version='legacy_v1'):
     """中心化非参数 bootstrap 的整体零均值检验；区间为逐类别点态区间。
 
     重复先在题内平均，保留条件于冻结 S0/材料的估计目标。该检验是
     渐近 bootstrap 检验，不冒称表达处理的精确随机化检验。
     """
+    from .protocol import STUDY_V2
+    if version==STUDY_V2: return _infer_v2(effects,settings)
+    if version!='legacy_v1': raise ValueError('未知推断版本')
     grouped = defaultdict(list)
     for row in effects:
         if row['D'] is not None:
@@ -72,3 +75,38 @@ def infer_effects(effects, settings):
         row['holm_family'] = 'all final-verdict dataset/model/operation tests in this run'
         row['holm_family_size'] = len(primary)
     return output
+
+
+def _infer_v2(effects,settings):
+    """Keep descriptive estimates but do not infer from an empirical point mass.
+
+    Unestimable predeclared tests retain a Holm slot (p=1 internally), never
+    become reported p=1 evidence for a null effect, and never get zero-width CIs.
+    """
+    output=infer_effects(effects,settings)
+    key_for=lambda r:tuple(r[k] for k in ('dataset_id','model_id','operation','round'))+(r.get('design','legacy_three_round'),)
+    planned={key_for(r) for r in effects}
+    present={key_for(r) for r in output}
+    for key in sorted(planned-present):
+        for layer in ('vote','verdict'):
+            output.append({**dict(zip(('dataset_id','model_id','operation','round','design'),key)),
+                           'layer':layer,'estimate':None,'confidence_intervals':None,'p_value':None,
+                           'independent_units':0,'primary':key[3]==3 and layer=='verdict',
+                           'degenerate':False,'resamples':settings['resamples'],'seed':settings['seed'],
+                           'alpha':settings['alpha'],'interval_unit':'item',
+                           'interval_scope':'pointwise; not simultaneous',
+                           'inference_scope':'conditional on frozen S0 and materials; iid items; exploratory process tests'})
+    for row in output:
+        for field in ('holm_p_value','holm_family','holm_family_size'): row.pop(field,None)
+        n=row['independent_units']
+        status='no_complete_items' if n==0 else ('insufficient_items' if n<2 else ('constant_vectors' if row['degenerate'] else 'ok'))
+        row.update(method='centered_item_bootstrap_vector_mean_v2',inference_status=status)
+        if status!='ok': row.update(p_value=None,confidence_intervals=None)
+    primary=[r for r in output if r['primary']]
+    estimable=[r for r in primary if r['p_value'] is not None]
+    adjusted=holm_adjust([r['p_value'] for r in estimable]+[1.]*(len(primary)-len(estimable)))
+    for row in primary:
+        row.update(holm_p_value=None,holm_family='all predeclared final-verdict dataset/model/operation tests; unestimable slots retained',
+                   holm_family_size=len(primary),holm_estimable_family_size=len(estimable))
+    for row,p in zip(estimable,adjusted): row['holm_p_value']=p
+    return sorted(output,key=lambda r:(key_for(r),r['layer']))

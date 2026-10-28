@@ -163,14 +163,45 @@ def analyze(store,selection=None):
     if store.config.get('complete_matrix'):
         from .matrix import result_matrix, matrix_summary
         matrix=result_matrix(store,graph)
-        extra.update(result_matrix=matrix,matrix_summary=matrix_summary(matrix),matrix_layout=store.config.get('matrix_layout','slot_first_v1'))
+        extra.update(result_matrix=matrix,matrix_summary=matrix_summary(matrix,store),matrix_layout=store.config.get('matrix_layout','slot_first_v1'))
         from .failures import enabled, failure_status
         if enabled(store):
             failures=failure_status(store,graph)
             extra.update(failures=failures['items'],failure_summary={k:v for k,v in failures.items() if k!='items'})
         if (store.path/'inputs'/'matrix-reuse-complete.json').exists():
             extra['matrix_reuse']=store.get('inputs','matrix-reuse-complete')
-    if store.config.get('inference'): extra['inference']=infer_effects(effects,store.config['inference'])
+    from .protocol import STUDY_V2
+    modern=store.config.get('study_protocol')==STUDY_V2
+    if modern:
+        # Keep the declared family even when a failed S0/material yielded no comparison.
+        present={(r['dataset_id'],r['item_id'],r['model_id'],r['operation'],r['round']) for r in effects}
+        for item in source['items']:
+            for model in store.config['debate_models']:
+                for op in store.config['operations']:
+                    for t in (1,2,3):
+                        key=(item['dataset_id'],item['item_id'],model,op,t)
+                        if key not in present:
+                            effects.append(dict(zip(('dataset_id','item_id','model_id','operation','round'),key),
+                                                design=store.config.get('matrix_protocol',LEGACY),initial_pattern='unavailable',
+                                                planned_repeats=1,complete_repeats=0,D=None))
+        from .study_analysis import supplement,noise_summaries
+        from .visibility import audit_visibility
+        extra.update(supplement(store,graph,gold,extra['condition_summaries']))
+        extra['noise_summaries']=noise_summaries(oo)
+        routing=audit_visibility(store,graph)
+        if not routing['valid']:
+            from .store import IntegrityError
+            raise IntegrityError('实际消息来源与冻结可见性计划不符，拒绝生成正常实验报告')
+        extra.update(study_protocol=STUDY_V2,visibility_audit=routing,
+                     execution_provenance={'providers':sorted({e.get('provider','unknown') for e in store.all('events') if e['kind']=='started'})},
+                     model_profiles=store.config['profiles'])
+        if store.config.get('coding'):
+            from .coding import coding_report
+            extra['coding_agreement']=coding_report(store,graph)
+        if store.config.get('material_validation'):
+            from .material_validation import report as validation_report
+            extra['material_validation']=validation_report(store,graph)
+    if store.config.get('inference'): extra['inference']=infer_effects(effects,store.config['inference'],version=STUDY_V2 if modern else 'legacy_v1')
     from .protocol import load_amendment
     return {'schema_version':1,'protocol_amendment':load_amendment(store),**extra,'denominators':denominators,'votes':vote_rows,'deliveries':deliveries,'pairs':pairs,'round_effects':rounds,'item_effects':effects,'summary_effects':summaries,'stratified_effects':stratified,
         'intervention_effects':interventions,'oo_diagnostics':oo,'execution_rows':complete_executions,'transitions':transitions,

@@ -2,18 +2,29 @@
 
 所有配置的相对数据路径以配置文件所在目录解析，不以终端当前目录解析。`validate` / `plan` 离线校验，不调用模型；`main-run` 会根据网络开关与凭据调用模型。
 
+推荐采用下表的v2配置（`study_protocol: continued_peer_exchange_v2`）。不带`-v2`的早期等轮次配置保留历史语义，缺少新版测量计划，不作为当前完整研究入口。
+
 ## 当前 RQ1：等轮次 V10、每题 16 格
 
 | 文件 | 作用 | HTTP 调用开关 |
 | --- | --- | --- |
-| `averitec-rq1-minimax-equal-rounds-3.json` | 已真实验收的 MiniMax 三题配置 | 开 |
-| `averitec-rq1-minimax-equal-rounds-500.json` | MiniMax 全量 500 题、一次重复、离线推断 | 开 |
-| `averitec-rq1-v10-local-3-template.json` | 本地 OpenAI 兼容服务三题模板 | 关 |
-| `averitec-rq1-v10-hosted-3-template.json` | 闭源服务商三题模板 | 关 |
-| `averitec-rq1-v10-equal-rounds-3-template.json` | 通用三题容量模板 | 关 |
-| `averitec-rq1-v10-equal-rounds-500-template.json` | 通用全量模板、离线推断 | 关 |
+| `averitec-rq1-minimax-equal-rounds-3-v2.json` | 沿用已验收服务参数的新版MiniMax三题配置，真实v2调用需另启动 | 开 |
+| `averitec-rq1-minimax-equal-rounds-500-v2.json` | MiniMax 全量 500 题、一次重复、离线推断 | 开 |
+| `averitec-rq1-v10-local-3-v2-template.json` | 本地 OpenAI 兼容服务三题模板 | 关 |
+| `averitec-rq1-v10-hosted-3-v2-template.json` | 闭源服务商三题模板 | 关 |
+| `averitec-rq1-v10-equal-rounds-3-v2-template.json` | 通用三题容量模板 | 关 |
+| `averitec-rq1-v10-equal-rounds-500-v2-template.json` | 通用全量模板、离线推断 | 关 |
 
 共同约定：`complete_matrix: true`、`matrix_layout: group_first_v2`、`matrix_protocol: equal_rounds_v10`、`repeats: 1`、七种操作、严格材料审核。I/M 都到 T3。无额外消息屏蔽或 O/O 诊断。
+
+新增预选材料验证与回复编码，三题/全量分别选3/50题，回复单位上限每题12；推断1999次、seed=20261022。主矩阵的诊断保持关闭，补充对照独立运行：
+
+| 文件 | 内容 | 开关 |
+| --- | --- | --- |
+| `averitec-rq1-neutral-oo-30-v2-template.json` | 固定30题，中性改写配对与两批O轨迹；上界2070次 | 关 |
+| `averitec-rq3-message-30-v2-template.json` | 固定30题、logos、T2屏蔽S→A；上界1530次 | 关 |
+
+补充对照不要求16格，以各自完整配对/诊断分母验收；用main-run启动但不传question-batch-size，保留--item-pipeline。模板样本数是预算默认值，不代表功效已经充足。
 
 三题通常 399 次调用，计划上界 435、护栏 600；全量通常 66,500 次，计划上界 72,500、护栏 90,000；均不含网络重试。全量 T2/T3 各 24,000 次自然回复，阶段护栏各 30,000。预算是停止护栏，非精确计费预测。
 

@@ -32,6 +32,8 @@ def load_credentials(path, profile):
 
 def run_main(config_path, run_id, runs_root=None, credentials_file=None, prepare_only=False, concurrency=3, progress=None,item_pipeline=False,single_pass=False,reuse_matrix_source=None,question_batch_size=None,continue_on_error=False):
     config = load_config(config_path)
+    if single_pass and config.get('matrix_protocol')=='equal_rounds_v10':
+        raise ValueError('等轮次完整矩阵不能启用单轮I协议变更；未创建运行')
     if not config.get('material_gate') or config.get('material_policy') != 'strict_v10':
         raise ValueError('main-run 只接受显式严格材料资格及全局冻结配置')
     root = Path(runs_root) if runs_root else Path.cwd() / 'runs'

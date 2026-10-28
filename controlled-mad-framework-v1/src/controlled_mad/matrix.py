@@ -22,8 +22,17 @@ def structured_blocks(original):
     return blocks
 
 
-def reorder_structured(original, operation, layout='slot_first_v1'):
+def reorder_structured(original, operation, layout='slot_first_v1', normalize=False):
     """移动四段内容并复用原来的三个段落分隔符，避免末段移位后与下一段粘连。"""
+    if normalize:
+        tail=re.search(r'(?:\r?\n)+\Z',original)
+        suffix=tail.group() if tail else ''
+        core=original[:-len(suffix)] if suffix else original
+        result=reorder_structured(core,operation,layout)
+        source=re.split(r'\r?\n[ \t]*\r?\n',core)
+        target=re.split(r'\r?\n[ \t]*\r?\n',result)
+        if len(target)!=4 or Counter(target)!=Counter(source): raise ValueError('重排后未保留四段原文')
+        return result+suffix
     structured_blocks(original)
     orders = {'conclusion_front': (1,0,2,3), 'conclusion_back': (0,2,3,1),
               'support_first': (0,1,3,2), 'limitation_first': (2,1,0,3)}
@@ -75,7 +84,21 @@ def result_matrix(store, graph):
     return rows
 
 
-def matrix_summary(rows):
+def matrix_summary(rows,store=None):
+    from .protocol import STUDY_V2
+    if store and store.config.get('study_protocol')==STUDY_V2:
+        items=store.get('inputs','items')['items']
+        expected={(i['dataset_id'],i['item_id'],m,v,p) for i in items for m in store.config['debate_models'] for v in ('O',*OPERATIONS) for p in ('I','M')}
+        grouped=defaultdict(list)
+        for row in rows: grouped[tuple(row[k] for k in ('dataset_id','item_id','model_id','variant','protocol'))].append(row)
+        complete={key for key,values in grouped.items() if key in expected and len(values)==1 and values[0]['status']=='complete' and values[0]['round']==3 and len(values[0]['votes'])==3}
+        by_item={(i['dataset_id'],i['item_id']) for i in items}
+        return {'view':'v2 frozen inputs × models × canonical 8 materials × I/M-T3','expected_outputs':len(expected),
+                'complete_outputs':len(complete),'total_items':len(by_item),
+                'complete_items':sum(all(k in complete for k in expected if k[:2]==item) for item in by_item),
+                'missing_rows':len(expected-set(grouped)),'duplicate_rows':sum(max(0,len(v)-1) for v in grouped.values()),
+                'unexpected_rows':sum(len(v) for k,v in grouped.items() if k not in expected),
+                'statuses':dict(Counter(r['status'] for r in rows))}
     by_item = defaultdict(list)
     for row in rows: by_item[(row['dataset_id'], row['item_id'])].append(row)
     return {'view': 'repeat=0; actual I final round and M-T3', 'expected_outputs': len(rows),

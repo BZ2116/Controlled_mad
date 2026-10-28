@@ -26,6 +26,12 @@ def verify_run(store):
             raise IntegrityError('解析中的投票标签越界')
     for tid,pid in store.selection().items():
         if pid not in parses or parses[pid]['task_id']!=tid: raise IntegrityError('选定解析引用不一致')
+    from .protocol import STUDY_V2
+    if store.config.get('study_protocol')==STUDY_V2:
+        from .scheduler import Planner
+        from .visibility import audit_visibility
+        routing=audit_visibility(store,Planner(store,persist=False).build())
+        if not routing['valid']: raise IntegrityError('实际消息来源与冻结可见性计划不符')
     return {**report,'verified_tasks':len(tasks),'verified_parses':len(parses)}
 
 def rebuild_state(store):

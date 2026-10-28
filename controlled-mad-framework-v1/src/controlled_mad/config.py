@@ -7,7 +7,7 @@ from .domain import AGENTS, OPERATIONS, ModelProfile, Intervention
 from .identity import canonical_hash, safe_id
 
 KEYS={'schema_version','dataset','profiles','debate_models','material_model','audit_model','material_audit','s0_batch','selection_seed','repeats','history_policy','message_order','operations','interventions','diagnostics','max_generation_attempts','max_attempts','budget','network_enabled','mock_scenario','prompts','experiment','subset'}
-OPTIONAL_V10={'material_policy','material_gate','inference','intervention_subset','coding','complete_matrix','matrix_layout','matrix_protocol'}
+OPTIONAL_V10={'material_policy','material_gate','inference','intervention_subset','coding','complete_matrix','matrix_layout','matrix_protocol','study_protocol','material_validation'}
 KEYS |= OPTIONAL_V10
 
 def validate_config(c):
@@ -25,8 +25,21 @@ def validate_config(c):
             or type(inference['seed']) is not int or type(inference['alpha']) not in (float,int)
             or not math.isfinite(inference['alpha']) or not 0<inference['alpha']<1):
             raise ValueError('推断配置须含 resamples>=99、整数 seed 和 0<alpha<1')
-    for field in ('coding','intervention_subset'):
-        if field in c: validate_subset(c[field])
+    for field in ('coding','intervention_subset','material_validation'):
+        if field in c:
+            subset=dict(c[field])
+            cap=subset.pop('replies_per_item',None) if field=='coding' and c.get('study_protocol')=='continued_peer_exchange_v2' else None
+            validate_subset(subset)
+            if cap is not None and (type(cap) is not int or cap<5+sum(2 if r['delivery_round']==2 else 1 for r in c['interventions'])):
+                raise ValueError('回复编码限额须为整数且覆盖预定轮次/分支层')
+    from .protocol import STUDY_V2
+    if 'study_protocol' in c and c['study_protocol']!=STUDY_V2: raise ValueError('未知研究设计版本')
+    modern=c.get('study_protocol')==STUDY_V2
+    if 'material_validation' in c and not modern: raise ValueError('人工材料验证须显式选择新研究设计版本')
+    if modern and (c.get('material_policy')!='strict_v10' or not c.get('material_gate') or c['repeats']!=1):
+        raise ValueError('新研究设计要求严格材料、资格冻结与单次主轨迹')
+    if modern and c.get('complete_matrix') and (c.get('matrix_protocol')!='equal_rounds_v10' or c.get('matrix_layout')!='group_first_v2'):
+        raise ValueError('新完整矩阵须显式选择 equal_rounds_v10 和 group_first_v2')
     if 'subset' in c: validate_subset(c['subset'])
     if 'complete_matrix' in c and type(c['complete_matrix']) is not bool:
         raise ValueError('complete_matrix 必须为布尔值')
@@ -44,6 +57,7 @@ def validate_config(c):
     if c['schema_version']!=1 or c['history_policy']!='full': raise ValueError('只支持 schema 1 和 full 累计历史')
     mode=c.get('experiment','rq1_three_round')
     if mode not in ('rq1_three_round','rq2_five_round'): raise ValueError('未知实验模式')
+    if modern and mode!='rq1_three_round': raise ValueError('新研究设计版本用于三轮主研究和补充对照；五轮实验须单独设计')
     if mode=='rq2_five_round':
         subset=c.get('subset')
         if not isinstance(subset,dict) or set(subset) not in ({'size','seed'},{'item_ids'}): raise ValueError('五轮实验须配置 size/seed 或 item_ids 子集')
@@ -56,7 +70,8 @@ def validate_config(c):
     for k in ('repeats','max_generation_attempts','max_attempts'):
         if type(c[k]) is not int or c[k]<1: raise ValueError(f'{k} 必须为正整数')
     if type(c['selection_seed']) is not int or type(c['network_enabled']) is not bool: raise ValueError('种子或网络开关类型无效')
-    if not c['operations'] or len(set(c['operations']))!=len(c['operations']) or set(c['operations'])-set(OPERATIONS): raise ValueError('表达操作无效')
+    allowed=set(OPERATIONS) | ({'neutral'} if modern and not c.get('complete_matrix') else set())
+    if not c['operations'] or len(set(c['operations']))!=len(c['operations']) or set(c['operations'])-allowed: raise ValueError('表达操作无效')
     if set(c['dataset'])!={'adapter','source'} or c['dataset']['adapter'] not in ('jsonl','averitec','mmlu_pro','bbq'): raise ValueError('数据适配配置无效')
     profiles=c['profiles']
     if not isinstance(profiles,dict) or not profiles: raise ValueError('缺少模型配置')

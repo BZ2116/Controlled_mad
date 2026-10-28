@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "dataset": {
+    "adapter": "averitec",
+    "source": "../datasets/averitec/dev.json"
+  },
+  "profiles": {
+    "candidate": {
+      "provider": "openai",
+      "model": "REPLACE_MODEL_ID",
+      "expected_model": "REPLACE_MODEL_ID",
+      "base_url": "https://example.invalid/v1",
+      "credential_env": "CANDIDATE_API_KEY",
+      "temperature": 0.0,
+      "max_tokens": 16384,
+      "max_tokens_field": "max_tokens",
+      "reasoning_effort": null,
+      "seed": null,
+      "supports_seed": false,
+      "context_limit": 128000,
+      "timeout": 180
+    }
+  },
+  "debate_models": [
+    "candidate"
+  ],
+  "material_model": "candidate",
+  "audit_model": "candidate",
+  "material_audit": true,
+  "s0_batch": "s0-neutral-noise-v2",
+  "selection_seed": 42,
+  "repeats": 1,
+  "history_policy": "full",
+  "message_order": [
+    "agent_1",
+    "agent_2",
+    "agent_3"
+  ],
+  "operations": [
+    "neutral"
+  ],
+  "interventions": [],
+  "diagnostics": {
+    "oo": {
+      "enabled": true,
+      "repeats": 1
+    }
+  },
+  "max_generation_attempts": 3,
+  "max_attempts": 3,
+  "budget": {
+    "max_calls": 4000,
+    "max_tokens": 600000000,
+    "stage_calls": {
+      "S0": 180,
+      "generate": 150,
+      "annotate": 0,
+      "audit": 150,
+      "T1": 600,
+      "T2": 1200,
+      "T3": 1200
+    }
+  },
+  "network_enabled": false,
+  "mock_scenario": null,
+  "material_policy": "strict_v10",
+  "material_gate": true,
+  "complete_matrix": false,
+  "study_protocol": "continued_peer_exchange_v2",
+  "coding": {
+    "size": 30,
+    "seed": 20261022,
+    "replies_per_item": 12
+  },
+  "material_validation": {
+    "size": 30,
+    "seed": 20261022
+  },
+  "subset": {
+    "size": 30,
+    "seed": 20261022
+  }
+}

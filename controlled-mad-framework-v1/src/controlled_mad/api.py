@@ -36,9 +36,9 @@ def validate(path):
 def plan(path):
     info=validate(path); c=load_config(path)
     n=info['items']*len(c['debate_models']); k=len(c['operations']); r=c['repeats']
-    rhetoric=sum(op in ('ethos','logos','pathos') for op in c['operations']); reorder=k-rhetoric
+    rhetoric=sum(op in ('ethos','logos','pathos','neutral') for op in c['operations']); reorder=k-rhetoric
     material_generate=n*rhetoric*c['max_generation_attempts']
-    annotation=n if reorder and not c.get('complete_matrix') else 0
+    annotation=n if reorder and not c.get('complete_matrix') and c.get('study_protocol')!='continued_peer_exchange_v2' else 0
     audit=n*(rhetoric*c['max_generation_attempts']+reorder) if c.get('material_audit',True) else 0
     single_matrix=c.get('complete_matrix') and c.get('matrix_protocol')!='equal_rounds_v10'
     natural=(9 if single_matrix else 15)*n*r*(1+k)
@@ -70,7 +70,7 @@ def matrix_status(store):
     """只读逐格验收；不取运行锁、不写报告，也不做全目录审计。"""
     from .matrix import result_matrix, matrix_summary
     rows=result_matrix(store,Planner(store,persist=False).build())
-    return {'summary':matrix_summary(rows),'result_matrix':rows}
+    return {'summary':matrix_summary(rows,store),'result_matrix':rows}
 
 def export_tasks(store,stage=None):
     with store.lock():
@@ -140,7 +140,47 @@ def import_coding(store,source):
 def coding_status(store):
     from .coding import agreement_report
     with store.lock():
-        return agreement_report(_coding_packet(store),_coding_records(store))
+        report=agreement_report(_coding_packet(store),_coding_records(store))
+        from .protocol import STUDY_V2
+        if store.config.get('study_protocol')==STUDY_V2:
+            from .coding import coding_report
+            report=coding_report(store,Planner(store,persist=False).build())
+            name='coding-agreement-'+canonical_hash(report)[:20]
+            store.put('exports',name,report)
+            return {**report,'report_path':str(store.path/'exports'/f'{name}.json')}
+        return report
+
+
+def export_material_validation(store):
+    from .material_validation import packet
+    with store.lock():
+        if not store.config.get('material_validation'): raise ValueError('本运行未预选人工材料验证子集')
+        rows=packet(store,Planner(store,persist=False).build())
+        name='material-validation-packet-'+canonical_hash(rows)[:20]
+        store.write_blob('exports',name,b''.join(canonical_bytes(r)+b'\n' for r in rows),'.jsonl')
+        return {'pairs':len(rows),'path':str(store.path/'exports'/f'{name}.jsonl'),
+                'codebook':store.get('inputs','material-validation-plan')['codebook'],'real_model_calls':0}
+
+
+def import_material_validation(store,source):
+    from .material_validation import packet,records,validate
+    rows=[json.loads(line) for line in Path(source).read_text(encoding='utf-8-sig').splitlines() if line.strip()]
+    with store.lock():
+        graph=Planner(store,persist=False).build()
+        validate(rows,packet(store,graph),records(store))
+        record={'rows':sorted(rows,key=lambda r:(r['validation_id'],r['coder_id']))}
+        name='material-validation-batch-'+canonical_hash(record)
+        store.put('analysis_inputs',name,record)
+        return {'batch_id':name,'rows':len(rows),'real_model_calls':0}
+
+
+def material_validation_status(store):
+    from .material_validation import report
+    with store.lock():
+        result=report(store,Planner(store,persist=False).build())
+        name='material-validation-agreement-'+canonical_hash(result)[:20]
+        store.put('exports',name,result)
+        return {**result,'report_path':str(store.path/'exports'/f'{name}.json')}
 
 def export_trace(store,item_id):
     with store.lock(): return trace(store,item_id)

@@ -51,7 +51,7 @@
 
 先在框架之外启动推理服务器，确认它支持 system/user/assistant 的累计历史、非流式 Chat Completions、所需上下文与 JSON 指令。框架不负责权重下载、GPU 安装或服务器部署。
 
-复制 `configs/averitec-rq1-v10-local-3-template.json` 为 `configs/my-local-3.json`。填写 profile，将 `network_enabled` 改为 true。本地 HTTP 也属于显式启用的网络后端。
+复制 `configs/averitec-rq1-v10-local-3-v2-template.json` 为 `configs/my-local-3.json`。填写 profile，将 `network_enabled` 改为 true。本地 HTTP 也属于显式启用的网络后端。
 
 只允许 `http://localhost`、IPv4 回环地址和 IPv6 回环地址，其他服务使用 HTTPS。若模型在远程服务器，可使用 HTTPS，或先建立 SSH 本地端口转发，再将框架指向本机端口；不向公网明文传送真实密钥。
 
@@ -70,7 +70,7 @@ python -X utf8 -u -m controlled_mad main-run `
 
 ## 闭源服务商
 
-复制 `configs/averitec-rq1-v10-hosted-3-template.json` 为 `configs/my-hosted-3.json`。填实际 HTTPS 地址、模型名、返回名、支持的参数，并开启 `network_enabled`。在本机配置 `HOSTED_MODEL_API_KEY` 环境变量，然后运行：
+复制 `configs/averitec-rq1-v10-hosted-3-v2-template.json` 为 `configs/my-hosted-3.json`。填实际 HTTPS 地址、模型名、返回名、支持的参数，并开启 `network_enabled`。在本机配置 `HOSTED_MODEL_API_KEY` 环境变量，然后运行：
 
 ```powershell
 python -X utf8 -m controlled_mad validate --config configs/my-hosted-3.json
@@ -84,10 +84,12 @@ python -X utf8 -u -m controlled_mad main-run `
 
 Anthropic 兼容服务将 provider 设为 anthropic、reasoning_effort 设为 null、max_tokens_field 设为 max_tokens，基础地址通常止于 `/v1`。框架发送 x-api-key 和 anthropic-version 头。其他返回格式需要新增后端适配，不能靠修改 provider 名绕过校验。
 
-## 三题通过后扩展
+## 三题与人工材料核查通过后扩展
 
-检查 48/48 格、21/21 份合格材料、T1 共享和 T2/T3 路由。三题是接口与流程验收，不要求出现标签变化。
+检查 48/48 格、21/21 份合格材料、T1 共享和 T2/T3 路由。三题是接口与流程验收，不要求出现标签变化。正式全量前按[人工验证指南](human-validation.md)检查试跑材料；自动合格不等于人工证明语义保持。
 
-复制 `averitec-rq1-v10-equal-rounds-500-template.json` 为新模型的 500 题配置；复制三题已验证的 profiles、debate_models、material_model、audit_model，开启网络，保留 full500 的预算和 inference 设置，再 plan 和启动新 run-id。每模型重新生成 S0、改写与讨论。保留权重/服务版本记录，服务商 token plan 等待刷新后，用原配置和原 run-id 续跑。
+复制 `averitec-rq1-v10-equal-rounds-500-v2-template.json` 为新模型的 500 题配置；复制三题已验证的 profiles、debate_models、material_model、audit_model，开启网络，保留 full500 的预算和 inference 设置，再 plan 和启动新 run-id。每模型重新生成 S0、改写与讨论。保留权重/服务版本记录，服务商 token plan 等待刷新后，用原配置和原 run-id 续跑。
+
+默认将三题作为独立先导，全量从新的500题run开始。v2先导与全量的人工抽样计划不同，现有复用接口会校验并拒绝不兼容配置；不要直接加旧的reuse参数，或把未审核的继承称为“剩余497题”。
 
 不要在某个 run 跑到一半后更改模型、服务地址、解码参数、容量字段、协议、源文件位置或提示；这些都可能改变冻结配置及任务身份。确需改变时新建 run。仅凭据值轮换或并发调整可以沿同一运行恢复，前提是模型与实验内容保持原样。

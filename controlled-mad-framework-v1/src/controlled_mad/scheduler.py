@@ -9,7 +9,7 @@ from .history import extend_history, with_reply
 from .router import route
 from .interventions import resolve_rule
 from .pipeline import item_pipeline_enabled, freeze_item_materials
-from .protocol import load_amendment, item_settings, SINGLE_PASS, EQUAL_ROUNDS
+from .protocol import load_amendment, item_settings, SINGLE_PASS, EQUAL_ROUNDS, STUDY_V2
 
 def complete_arm(arm): return all(snapshot for states in arm.values() for snapshot in states.values())
 
@@ -156,7 +156,7 @@ class Planner:
                 tasks=[]
                 for agent in AGENTS:
                     ctx={**base,'agent':agent,'round':0}
-                    if self.config.get('complete_matrix'):
+                    if self.config.get('complete_matrix') or self.config.get('study_protocol')==STUDY_V2:
                         from .matrix import STRUCTURE
                         ctx['comment_structure']=STRUCTURE
                     tasks.append(self.make('S0',model,self.prompt('s0',{'task_input':item.task_input,'allowed_labels':list(item.labels)}),(),ctx))

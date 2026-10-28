@@ -2,21 +2,24 @@
 from .domain import AGENTS
 from .identity import canonical_hash
 from .material_checks import check_material, reorder
+from .protocol import STUDY_V2
 
 def prepare_materials(graph,item,s0,base):
     original_vote=s0.votes[AGENTS.index(s0.sender)]
     original=original_vote.comment; label=original_vote.label
     payload={'task_input':item.task_input,'allowed_labels':list(item.labels),'original':original,'label':label}
     complete_matrix=graph.config.get('complete_matrix',False)
+    modern=graph.config.get('study_protocol')==STUDY_V2
+    structured=complete_matrix or modern
     records=[]
     for operation in graph.config['operations']:
         attempts=[]; final=None
-        max_tries=graph.config['max_generation_attempts'] if operation in ('ethos','logos','pathos') else 1
+        max_tries=graph.config['max_generation_attempts'] if operation in ('ethos','logos','pathos','neutral') else 1
         for generation in range(1,max_tries+1):
             ctx={**base,'operation':operation,'generation':generation,'original':original,'label':label}
-            if operation in ('ethos','logos','pathos'):
+            if operation in ('ethos','logos','pathos','neutral'):
                 request={**payload,'expression':operation}
-                if complete_matrix and final:
+                if structured and final:
                     request['previous_failure']=final['reason']
                     if final.get('rewritten'): request['previous_candidate']=final['rewritten']
                     ctx['previous_failure']=final['reason']
@@ -30,14 +33,14 @@ def prepare_materials(graph,item,s0,base):
                 if not generated['valid']:
                     final={'status':'ineligible','reason':'材料生成输出无效'}; continue
                 value=generated['value']; rewritten=value['comment']; new_label=value['label']
-                if complete_matrix:
+                if structured:
                     from .matrix import structured_blocks
                     try: structured_blocks(rewritten)
                     except ValueError as error:
                         final={'status':'ineligible','reason':str(error)}; continue
-            elif complete_matrix:
+            elif structured:
                 from .matrix import reorder_structured
-                try: rewritten=reorder_structured(original,operation,graph.config.get('matrix_layout','slot_first_v1'))
+                try: rewritten=reorder_structured(original,operation,graph.config.get('matrix_layout','group_first_v2' if modern else 'slot_first_v1'),normalize=modern)
                 except ValueError as error:
                     final={'status':'ineligible','reason':str(error)}; break
                 new_label=label
@@ -57,22 +60,22 @@ def prepare_materials(graph,item,s0,base):
                 except ValueError as error:
                     final={'status':'ineligible','reason':str(error)}; break
                 new_label=label
-            checks=check_material(original,rewritten,label,new_label)
+            checks=check_material(original,rewritten,label,new_label,version=STUDY_V2 if modern else 'legacy_v1')
             if not checks['valid']:
                 final={'status':'ineligible','reason':'标签变化或评论为空','checks':checks}; continue
             if checks['no_change']:
                 final={'status':'no_change','reason':'R 与 O 完全相同','checks':checks,'rewritten':rewritten}
-                if complete_matrix and operation in ('ethos','logos','pathos'): continue
+                if structured and operation in ('ethos','logos','pathos','neutral'): continue
                 break
             if graph.config.get('material_policy')=='strict_v10' and (checks['new_numbers'] or checks['new_urls']):
                 final={'status':'ineligible','reason':'新增数字或来源 URL，严格策略不予入组','checks':checks,'rewritten':rewritten}; continue
             if not graph.config.get('material_audit',True):
                 final={'status':'eligible','reason':'机械检查通过；未启用语义审核','rewritten':rewritten,'checks':checks}
                 break
-            dependency=source_task if complete_matrix and operation not in ('ethos','logos','pathos') else task.task_id
+            dependency=source_task if structured and operation not in ('ethos','logos','pathos','neutral') else task.task_id
             audit_context={**ctx,'rewritten':rewritten,'checks':checks,'source_parse':graph.selected[dependency]}
             audit_payload={**payload,'candidate':rewritten,'operation':operation,'mechanical_checks':checks}
-            if graph.config.get('matrix_layout')=='group_first_v2' and operation in ('support_first','limitation_first'):
+            if (graph.config.get('matrix_layout')=='group_first_v2' or modern) and operation in ('support_first','limitation_first'):
                 audit_context['matrix_layout']='group_first_v2'
                 target='support' if operation=='support_first' else 'limitation'
                 audit_payload['operation_definition']=(f'Move ALL {target} paragraphs to the very beginning, preserving their internal order. '
