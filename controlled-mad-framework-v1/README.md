@@ -6,11 +6,14 @@
 
 当前 RQ1 使用显式协议 `matrix_protocol: equal_rounds_v10`。每题 8 种材料 × I/M 两个 T3 终局 = **16 格**；一次重复。I/M 共用 T1，之后都走到 T3。I 在 T2/T3 不接收新同伴消息，M 接收上一轮另两人的回复。I 是“首次接触后停止同伴更新”的对照。S0 是讨论前的三人独立初答，另行保留。
 
-2026-10-28：此前 MiniMax-M3.1-Flash 的真实等轮次三题试跑已完成 48/48 格、21/21 份自动合格改写。三题均为 S0 全体一致，终局无表达效应；这验证核心流程，不代表新增v2人工测量已经完成。v2已通过模拟及自动测试，真实v2调用仍需另行启动。此前完成的 500 题使用 I-T1/M-T3 旧协议，保留为独立探索性实验。
+2026-10-30：当前 v2 已使用真实 MiniMax-M3.1-Flash 完成三题验收：**48/48 格完整、21/21 份自动合格改写**。24 个共享 T1 快照、63 组初始输入对照、288 处历史前缀及 360 条讨论回复路由均核验通过；原命令续跑新增请求为 0。全套 181 项测试和已知非零/反转效应的 mock 演示通过。三题各条件终局未变化，仅用于工程验收；人工材料核查和回复编码尚未完成。详见[三题验收记录](guide/pilot-validation-v2.md)。
+
+本地 Ollama + Qwen3 4B Thinking 在本次 4GB 显卡环境下未完成验收，随后独立切换 MiniMax 运行，未混用结果。此前完成的 500 题使用 I-T1/M-T3 旧协议，保留为独立探索性实验；不代表当前 v2 全量已完成。
 
 - [实验协议、指标和解释边界](guide/experiment-design.md)
 - [v2完整研究规范与补充对照](guide/study-protocol-v2.md)
 - [材料操纵核查与回复编码](guide/human-validation.md)
+- [v2 真实三题验收与验证边界](guide/pilot-validation-v2.md)
 - [启动、十题批次、三题并发、暂停和断点续跑](guide/running-experiments.md)
 - [更换模型：本地开源服务 / 闭源 API / 参数契约](guide/model-backends.md)
 - [配置索引：当前推荐与历史配置](configs/README.md)
@@ -32,9 +35,25 @@ python -X utf8 -m controlled_mad status --run-id demo-first --runs-root ../runs
 
 演示使用合成题和模拟回复，无需 API 密钥。首次初始化使用未用过的 run-id。源码直接运行时，可用 `$env:PYTHONPATH = 'src'` 代替安装；Linux/macOS 对应 `export PYTHONPATH=src`。
 
-## MiniMax 完整 500 题
+## MiniMax 三题验收与完整 500 题
 
 先在本机设置 `MINIMAX_API_KEY`，或在下面命令增加 `--credentials-file <你明确指定的本地文件>`。框架不自动发现 `.env`，配置只记录凭据环境变量名。启动真实模型会产生请求或费用。
+
+新环境先用三题配置验收。以下命令是新运行示例；已有同名运行时，仅在配置一致时续跑，否则换用未使用的 run-id。
+
+```powershell
+python -X utf8 -m controlled_mad validate --config configs/averitec-rq1-minimax-equal-rounds-3-v2.json
+python -X utf8 -m controlled_mad plan --config configs/averitec-rq1-minimax-equal-rounds-3-v2.json
+python -X utf8 -u -m controlled_mad main-run `
+  --config configs/averitec-rq1-minimax-equal-rounds-3-v2.json `
+  --run-id minimax-continued-peer-pilot3-v2 `
+  --runs-root ../runs `
+  --question-batch-size 3 `
+  --concurrency 3 `
+  --item-pipeline
+```
+
+三题完整且人工核查材料后，再使用独立 run-id 启动全量：
 
 ```powershell
 python -X utf8 -m controlled_mad plan --config configs/averitec-rq1-minimax-equal-rounds-500-v2.json
